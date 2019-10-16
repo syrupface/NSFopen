@@ -9,11 +9,16 @@ pip install nanosurf
 
 ## Prequisites
 numpy
+
 itertools
+
 pandas (optional)
 
-## Use
-Easiest use case
+
+## Example Script
+Available in example folder
+
+### Minimum example
 ```
 from nanosurf import read
 afm = read('filename.nid')
