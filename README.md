@@ -2,7 +2,11 @@
 Open Nanosurf NID files in Python
 
 ## Installing
-Can be installed from PyPi by typing
+From source
+```
+python setup.py install
+```
+or from PyPi
 ```
 pip install nanosurf
 ```
