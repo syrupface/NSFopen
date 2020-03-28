@@ -4,7 +4,7 @@ Created on Thu Jan 31 09:31:09 2019
 
 @author: nelson
 """
-from nanosurf import read
+from NSFopen import read
 
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -21,6 +21,7 @@ def flatten(data,order=1):
     return data_out
 
 file='image.nid'
+file='M01232-Lattice-MFM-m8000000028.nid'
 
 afm=read(file) # loads data in afm object
 data=afm.data
