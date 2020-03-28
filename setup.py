@@ -7,10 +7,10 @@ Created on Sat Oct 12 12:34:04 2019
 
 from distutils.core import setup
 
-setup(name='nanosurf',
-      version='1.1',
+setup(name='NSFopen',
+      version='0.1.8',
       description='Access data and parameters from Nanosurf NID files',
       author='Edward Nelson',
       author_email='nelson@nanosurf.com',
-      packages=['nanosurf']
+      packages=['NSFopen']
       )
