@@ -109,7 +109,7 @@ class read:
         # Regex matches per data type
         regF=r'[-+]?\d+\.\d+|\d+' # floats or integers
         regE=r'[-]?\d+[\.\d+]*[eE][-+]?\d+|\d+\.\d+|\d+' # scientific notation or float
-        regU=r'[mVN]' # units
+        regU=r'[mVNH]' # units
         regS=r'[a-zA-Z\- ]+' # string i.e. channel name
         regM=r'\d+[a-zA-Z\/\(\) ]+' # mixed data
         
@@ -161,7 +161,9 @@ class read:
         
         value=[]
         for i,j in zip(idx,match):
-            value.append(list(chain.from_iterable([re.findall(re.compile(j),header[x].split('=')[1]) for x in i])))
+            found=list(chain.from_iterable([re.findall(re.compile(j),header[x].split('=')[1]) for x in i]))
+            found = ['Hz' if x == 'H' else x for x in found]
+            value.append(found)
         
         channelN=len(value[5])
               
