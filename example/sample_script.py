@@ -21,7 +21,6 @@ def flatten(data,order=1):
     return data_out
 
 file='image.nid'
-file='M01232-Lattice-MFM-m8000000028.nid'
 
 afm=read(file) # loads data in afm object
 data=afm.data
