@@ -28,7 +28,7 @@ param=afm.param
     
 # IMAGE DATA
 # get height data for example in nanometers
-height=data.Image.Forward.ZAxis*1e9
+height=data.Image.Forward['Z-Axis'] * 1e9
 
 # 2nd order flattening
 height_flattened=flatten(height,order=2)
