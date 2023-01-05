@@ -1,1 +1,2 @@
-python setup.py sdist bdist_wininst upload
+python setup.py sdist
+twine upload dist/*

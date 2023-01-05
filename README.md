@@ -16,16 +16,25 @@ numpy
 
 itertools
 
-pandas (optional)
+pandas (recommended, required for NHF for now)
+
+h5py (required for NHF files)
 
 
 ## Example Script
 Available in example folder
 
-### Minimum example
+### Example: NID File
 ```
-from nanosurf import read
-afm = read('filename.nid')
+from NSFopen.read import nid_read
+afm = nid_read('filename.nid')
+data = afm.data # raw data
+param = afm.param # parameters
+```
+### Example: NHF File
+```
+from NSFopen.read import nhf_read
+afm = nhf_read('filename.nid')
 data = afm.data # raw data
 param = afm.param # parameters
 ```
