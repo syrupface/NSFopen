@@ -5,7 +5,7 @@ Created on Thu Jun  4 15:13:47 2020
 @author: Edward
 """
 
-from NSFopen.read import read
+from NSFopen.read import nid_read, nhf_read
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -13,13 +13,21 @@ from matplotlib.ticker import LinearLocator, FormatStrFormatter
 from matplotlib import cm
 import pandas as pd
 import scipy.stats as ss
+import os, sys
 
 
 class process():
     def __init__(self, filename):
-        afm = read(filename, verbose=False)
+        
+        _,ext = os.path.splitext(filename)
+        if ext == ".nid":
+            afm = nid_read(filename, verbose=False)
+        elif ext == ".nhf":
+            afm = nhf_read(filename)
+        else:
+            print("Not a valid filetype")
+            sys.exit()
         self.data = afm.data
-        # self.processed = afm.data.copy()
         self.param = afm.param
 
     def flatten(self, order=1, direction='Forward', channel='Z-Axis', mask=[]):
@@ -48,9 +56,13 @@ class process():
               theme='light'):
 
         d = np.array(self.data['Image'][direction][channel]*scale,dtype=float)
-        x = self.param.X.range[0] * 1e6
-        y = self.param.Y.range[0] * 1e6
-
+        if hasattr(afm.param, 'X'):
+            x = self.param.X.range[0] * 1e6
+            y = self.param.Y.range[0] * 1e6
+        else:
+            x = self.param.image_size_x * 1e6
+            y = self.param.image_size_y * 1e6
+            
         fig = plt.figure()
 
         if theme=='light':
@@ -158,22 +170,23 @@ class process():
 
 
 if __name__ == "__main__":
-    file = "test.nid"
+    file='..\\example\\image.nhf'
     
     # fig = plt.figure(dpi=300)
     afm = process(file)
 
-    afm.flatten(channel='Z-Axis Sensor')
+    chan = 'Position Z'
+    afm.flatten(channel=chan)
     # plt.clim(-100,50)
-    afm.image(cbar='Z [nm]', channel='Z-Axis Sensor', scalebar=False, scale=1e9, theme='light')
+    afm.image(cbar='Z [nm]', channel=chan, scalebar=False, scale=1e9, theme='light')
     plt.show()
     
     # fig = plt.figure(dpi=300)
-    rms = afm.stats().Forward.Sa['Z-Axis Sensor']
-    z = afm.data.Image.Forward['Z-Axis Sensor']
+    rms = afm.stats().Forward.Sa[chan]
+    z = afm.data.Image.Forward[chan]
     mask = z > 2*rms
-    afm.flatten(channel='Z-Axis Sensor', mask=mask)
-    fig = afm.image(cbar='Z [nm]', channel='Z-Axis Sensor', scalebar=False, scale=1e9, theme='dark')
+    afm.flatten(channel=chan, mask=mask)
+    fig = afm.image(cbar='Z [nm]', channel=chan, scalebar=False, scale=1e9, theme='dark')
     fig.set_dpi(300)
     # plt.clim(-100,50)
     plt.show()

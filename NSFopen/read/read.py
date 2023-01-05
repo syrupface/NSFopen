@@ -28,12 +28,13 @@ SOFTWARE.
 import re
 import numpy as np
 import h5py
+import pandas as pd
 import time
 
 
 class nid_read():
     def __init__(self, filename=None, dataframe=True, verbose=True):
-        self.filename = filename
+        self.filename = checkFileType(filename, 'nid')
         self.__dataframe = dataframe
         self.verbose = verbose
         # names of the channels that can be opened.  Can be added to.
@@ -337,32 +338,17 @@ class nid_read():
 
         if self.__dataframe:
             # import pandas as pd
-            self.data = self.__toPandaDF(dataout).unstack(level=0)
+            self.data = toPandaDF(dataout).unstack(level=0)
             # self.specunits = pd.DataFrame(specUnits)
-            self.param = self.__toPandaSeries(parameters)
+            self.param = toPandaSeries(parameters)
         else:
             self.data = dataout
             self.param = parameters
 
-    @staticmethod
-    def __toPandaDF(user_dict):
-        import pandas as pd
-        df = pd.DataFrame.from_dict({(i, j): user_dict[i][j]
-                                     for i in user_dict.keys()
-                                     for j in user_dict[i].keys()}, orient='index').transpose()
-        return df
-
-    @staticmethod
-    def __toPandaSeries(user_dict):
-        import pandas as pd
-        df = pd.Series({(i, j): user_dict[i][j]
-                        for i in user_dict.keys()
-                        for j in user_dict[i].keys()})
-        return df
 
 class nhf_read():
     def __init__(self, filename=None):
-        self.filename = filename
+        self.filename = checkFileType(filename, 'nhf')
         self.fopen = h5py.File(filename, 'r')
         self.read()
 
@@ -406,12 +392,43 @@ class nhf_read():
                 
                 data_out[direction][channel] = np.reshape(data[:], [Nx, Ny])*scale
         
+        _data_out={}
+        _data_out['Image'] = data_out
         
-        import pandas as pd
-        self.data = pd.DataFrame(data_out).unstack(level=0)
-        self.prop = prop_s
+        self.data = toPandaDF(_data_out).unstack(level=0)
+        self.param = pd.Series(prop_s)
+        
+
+def toPandaDF(user_dict):
+    df = pd.DataFrame.from_dict({(i, j): user_dict[i][j]
+                                 for i in user_dict.keys()
+                                 for j in user_dict[i].keys()}, orient='index').transpose()
+    return df
+
+def toPandaSeries(user_dict):
+    df = pd.Series({(i, j): user_dict[i][j]
+                    for i in user_dict.keys()
+                    for j in user_dict[i].keys()})
+    return df
+
+
+
+def checkFileType(filename, cla):
+    import sys, os
+    switch = {'nid':'nhf_read','nhf':'nid_read'}
+    
+    _,ext = os.path.splitext(filename)
+    if ext[-3:] != cla:
+        print(f'\nWrong file type detected, use "%s" instead' % switch[cla])
+        sys.exit()
+    elif ext[-3:] == cla:
+        return filename
+    else:
+        print("\nNot a valid filetype")
+        exit()
+    
 
 if __name__=="__main__":
-    filename='..\\example\\image.nid'
-    afm=nid_read(filename)
-    print(afm.data)
+    filename='..\\example\\image.nhf'
+    afm=nhf_read(filename)
+    print(afm.param)

@@ -34,7 +34,7 @@ param = afm.param # parameters
 ### Example: NHF File
 ```
 from NSFopen.read import nhf_read
-afm = nhf_read('filename.nid')
+afm = nhf_read('filename.nhf')
 data = afm.data # raw data
 param = afm.param # parameters
 ```

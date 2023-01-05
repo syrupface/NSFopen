@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name='NSFopen'
-version='2.0.2'
+version='2.0.4'
 authors=[
 	{name='Nanosurf', email='scripting@nanosurf.com'},
 ]
@@ -19,8 +19,7 @@ classifiers = [
 dependencies = [
 	'h5py',
 	'pandas',
-	'numpy',
-	'itertools']
+	'numpy']
 	
 [tool.setuptools.package-data]
     'example' = ['*.nid',

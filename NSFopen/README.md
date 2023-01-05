@@ -13,13 +13,8 @@ pip install nanosurf
 
 ## Prequisites
 numpy
-
-itertools
-
-pandas (recommended, required for NHF for now)
-
+pandas
 h5py (required for NHF files)
-
 
 ## Example Script
 Available in example folder
