@@ -10,12 +10,13 @@ from setuptools import find_packages, setup
 
 setup(
     name='NSFopen',
-    version='2.0.0',
+    version='2.0.1',
     description='Read data and parameters from Nanosurf NID and NHF files',
     author='Nanosurf',
     author_email='scripting@nanosurf.com',
     url="https://www.nanosurf.com",
 	packages = find_packages(),
+    readme = "README.md"
     include_package_data = True,
     package_data = {
         'example': ['*.nid',
