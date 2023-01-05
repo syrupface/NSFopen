@@ -16,7 +16,7 @@ setup(
     author_email='scripting@nanosurf.com',
     url="https://www.nanosurf.com",
 	packages = find_packages(),
-    readme = "README.md"
+    readme = "README.md",
     include_package_data = True,
     package_data = {
         'example': ['*.nid',
