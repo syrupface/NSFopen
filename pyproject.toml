@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name='NSFopen'
+version='2.0.2'
+authors=[
+	{name='Nanosurf', email='scripting@nanosurf.com'},
+]
+description='Read data and parameters from Nanosurf NID and NHF files'
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+	'h5py',
+	'pandas',
+	'numpy',
+	'itertools']
+	
+[tool.setuptools.package-data]
+    'example' = ['*.nid',
+        'Calculate_Roughness/*.*',
+        'Lateral_Force/*.*',
+        'Plotting_Data/*.*',
+        '2D_Plane_Removal/*.*',
+        'Sharpen_Image/*.*',
+        'ForceSpectroscopy/*.*']
+		
+[project.urls]
+"Homepage"="https://www.nanosurf.com"
+"GIT"="https://github.com/syrupface/NSFopen.git"
+
+
