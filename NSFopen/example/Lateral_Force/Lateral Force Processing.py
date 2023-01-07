@@ -13,7 +13,7 @@ from NSFopen.read import read
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import cm
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 
 # In[2]:
@@ -40,7 +40,7 @@ frict1 = data['Image']['Backward']['Friction force']
 
 offset = 5 # pixels
 
-sum = (frict1[:, :-offset] + frict0[:, offset:])/2
+sum_ = (frict1[:, :-offset] + frict0[:, offset:])/2
 diff = (frict1[:, :-offset] - frict0[:, offset:])/2
 
 
@@ -49,30 +49,33 @@ diff = (frict1[:, :-offset] - frict0[:, offset:])/2
 
 # X and Y data is stored in the parameters
 param = afm.param
-Xmin = param.X['min'][0] * 1e6  # the minimum of X of channel 0 scaled to um
-Xmax = param.X['range'][0] * 1e6  # the range of X of channel 0 scaled to um
+extents = [param[i][j][0] * 1e6 for i in ['X','Y'] for j in ['min','range']]
 
-Ymin = param.Y['min'][0] * 1e6  # the minimum of Y for channel 0 scaled to um
-Ymax = param.Y['range'][0] * 1e6  # the range of Y for channel 0 scaled to um
+Xmax = extents[1]
 
 # calculate the new X-range with the offset removed
 pixel_size = Xmax/np.shape(frict0)[0]
 Xmax -= pixel_size * offset
 
-extents = [Xmin, Xmax, Ymin, Ymax]
-
 
 # In[6]:
 
 
-fig, ax = plt.subplots(1,2, figsize=(20,10))
-ax[0].imshow(sum, extent=extents)
+fig, ax = plt.subplots(1,2, figsize=(12,8), dpi=300)
+fig.tight_layout(pad=6.0)
+
+im = np.copy(ax)
+im[0] = ax[0].imshow(sum_, extent=extents)
 ax[0].set_title('Sum')
-ax[1].imshow(diff, extent=extents)
+im[1] = ax[1].imshow(diff, extent=extents)
 ax[1].set_title('Difference')
 
-[ax[i].set_xlabel('[$\mu$m]') for i in range(2)];
-[ax[i].set_ylabel('[$\mu$m]') for i in range(2)];
+for i in range(2):
+    ax[i].set(xlabel='X [$\mu$m]', ylabel='Y [$\mu$m]')
+    ax_divider = make_axes_locatable(ax[i])
+    cax = ax_divider.append_axes("right", size="5%", pad="2%")
+    cb = plt.colorbar(im[i], cax=cax)
+    cb.set_label('[V]')
 plt.show()
 
 

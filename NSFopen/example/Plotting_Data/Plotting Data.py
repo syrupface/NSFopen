@@ -13,15 +13,15 @@ from NSFopen.read import read
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib import cm
 
 
 # In[2]:
 
 
 # import the data
-data_file = "MoS2.nid"
-afm = read(data_file)
+filename = "MoS2.nid"
+
+afm = read(filename)
 data = afm.data
 
 
@@ -32,7 +32,6 @@ data = afm.data
 def flatten(data, order=1, mask=[]):
     data_out = np.copy(data)  # create copy of data
     data_in = np.copy(data)
-    
     if np.any(mask):
         data_in[mask] = np.nan
     for idx, (out, line) in enumerate(zip(data_out, data_in)):
@@ -58,13 +57,7 @@ Zaxis_ = flatten(Zaxis, order=1)  # flatten data with 1st order polynomial (i.e.
 
 # X and Y data is stored in the parameters
 param = afm.param
-Xmin = param.X['min'][0] * 1e6  # the minimum of X of channel 0 scaled to um
-Xmax = param.X['range'][0] * 1e6  # the range of X of channel 0 scaled to um
-
-Ymin = param.Y['min'][0] * 1e6  # the minimum of Y for channel 0 scaled to um
-Ymax = param.Y['range'][0] * 1e6  # the range of Y for channel 0 scaled to um
-
-extents = [Xmin, Xmax, Ymin, Ymax]
+extents = [param[i][j][0] * 1e6 for i in ['X','Y'] for j in ['min', 'range']]
 
 
 # We want to limit the color range of the plot to not include the upper and lower 2% of data
@@ -81,17 +74,17 @@ clip = [np.percentile(Zaxis_, percent) for percent in [2, 98]]
 
 # define function to plot data with colorbar
 def plot2D(data, extents=extents, limits=clip):
-    plt.figure(figsize=(14, 10))
+    plt.figure(figsize=(7, 5), dpi=300)
     im = plt.imshow(data,
                     extent = extents,
-                    origin = 'lowerleft',
+                    origin = 'lower',
                     clim = limits,
-                    cmap=cm.afmhot)
+                    cmap='afmhot')
 
-    plt.xlabel('[$\mu$m]')
-    plt.ylabel('[$\mu$m]')
+    plt.xlabel('X [$\mu$m]')
+    plt.ylabel('Y [$\mu$m]')
     cb = plt.colorbar(im)
-    cb.set_label('[nm]')
+    cb.set_label('Z [nm]')
     plt.show()
 
 plot2D(Zaxis_, extents=extents, limits=clip)
@@ -101,14 +94,14 @@ plot2D(Zaxis_, extents=extents, limits=clip)
 
 
 # create mask to ignore data > 2 nm
-mask = Zaxis_>2
+mask = Zaxis_ > 2
 
 
-# In[10]:
+# In[9]:
 
 
 # flatten data again but using mask
-Zaxis_2 = flatten(Zaxis_,mask=mask)
+Zaxis_2 = flatten(Zaxis_, mask=mask)
 plot2D(Zaxis_2)
 
 

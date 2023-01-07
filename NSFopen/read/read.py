@@ -29,12 +29,47 @@ import re
 import numpy as np
 import h5py
 import pandas as pd
+import sys, os
 import time
 
+class read():
+    def __init__(self, filename=None, **kwargs):
+        self.filename = filename
+        self.data = None
+        self.param = None
+
+        
+        if not filename:
+            print('\nFile required!\n')
+            return
+        
+        _,ext = os.path.splitext(filename)
+        if ext == '.nid':
+            nid = nid_read(filename=filename, **kwargs)
+            self.data = nid.data
+            self.param = nid.param
+            
+            
+        elif ext == '.nhf':
+            nhf = nhf_read(filename)
+            
+            self.data = nhf.data
+            self.param = nhf.param
+            
+        else:
+            print("Not a valid filetype")
+            return
 
 class nid_read():
-    def __init__(self, filename=None, dataframe=True, verbose=True):
-        self.filename = checkFileType(filename, 'nid')
+    def __init__(self, filename=None, dataframe=True, verbose=False):        
+        self.filename = filename
+        self.data = None
+        self.param = None
+
+        if not filename:
+            print('\nFile required!\n')
+            return
+
         self.__dataframe = dataframe
         self.verbose = verbose
         # names of the channels that can be opened.  Can be added to.
@@ -42,11 +77,7 @@ class nid_read():
                            'Scan forward', 'Scan backward', '2nd scan forward', '2nd scan backward',
                            'Frequency sweep', 'Frequency sweep SHO', 'Spectrum FFT', 'Spectrum Fit']
         self.data_types = [1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2]
-        self.data = None
-        self.param = None
-        if not filename:
-            print('\nFile required!\n')
-            return
+
         self.read()
 
     def read(self):
@@ -86,7 +117,7 @@ class nid_read():
         def from_array(key, param):
             return float(header[key][param].split(',')[4])
 
-        def get_values(key, param):
+        def get_values(key, param, df=False):
             string = header[key][param]
 
             ty, val, unit = re.search(r'(\S)\[(.*)\]\*\[(.*)\]', string).groups()
@@ -99,7 +130,15 @@ class nid_read():
             if ty == 'V':
                 val = [float(v) for v in val.split(',')]
                 unit = [str(u) for u in unit.split(',')]
-            return {'Value': val, 'Unit': unit}
+            out = {'Value': val, 'Unit': unit}
+            if df:
+                if len(out)==1:
+                    return pd.DataFrame(out)
+                else:
+                    return pd.DataFrame(out)
+            else:
+                return out
+
 
         groupNames = []
         dataSet = []
@@ -176,12 +215,31 @@ class nid_read():
             count = int(header[key + '\\' + secNames[1]]['Count'])
             
             mapTable = [header[key + '\\' + secNames[1]][specMode[:3] + str(i)].split(';') for i in range(count)]
-            mapTable = np.array(mapTable).astype(np.float)
+            mapTable = np.array(mapTable).astype(float)[0]
+        
+        
+        specParam ={}
+        modFw, modBw, pauseFw, pauseBw, rangeFw, rangeBw, stopFw = ([] for i in range(7))
+        key = 'DataSet\\Parameters\\Spectroscopy'
+        if key in header:
+            modFw = get_values(key, 'FwModTime')
+            modBw = get_values(key, 'BwModTime')
+            pauseFw = get_values(key, 'FwPauseTime')
+            pauseBw = get_values(key, 'BwPauseTime')
+            rangeFw = get_values(key, 'FwModRange')
+            rangeBw = get_values(key, 'BwModRange')
+            stopFw = get_values(key, 'FwModStopValue')
             
-        scanOffset = {}
+            
+        scanParam = {}
+        scanRange, scanTime, scanOffset, scanRotation = ([] for i in range(4))
         key = 'DataSet\\Parameters\\Imaging'
         if key in header:
+            scanRange = get_values(key, 'ScanRange')
+            scanTime = get_values(key, 'ScanTime')
             scanOffset = get_values(key, 'ScanOffset')
+            scanRotation = get_values(key, 'ScanRotation')
+            
         
         thermal = {}
         key = 'DataSet-Info'
@@ -254,8 +312,8 @@ class nid_read():
                 data_crop.append(temp)
             else:
                 data_crop.append(dSet)
-        data = np.array(data_crop, dtype=float)
-
+        data = np.asarray(data_crop, dtype=object)
+        
         # this is the index of the channels that will be output.
         idx = [idx for idx, frame in enumerate(param['Frame']) if frame in self.data_names]
 
@@ -270,8 +328,11 @@ class nid_read():
                 out[frame] = {}
             if chan not in out[frame]:
                 out[frame][chan] = {}
-            out[frame][chan] = dat
-    
+            if isinstance(dat, list):
+                out[frame][chan] = dat
+            else:
+                out[frame][chan] = dat.astype(float)
+
         image = {}
         spec = {}
         spectrum = {}
@@ -318,11 +379,14 @@ class nid_read():
                      [param['Dim1Min'], param['Dim1Range'], param['Dim1Unit']]))
         z = dict(zip(['min', 'range', 'units'],
                      [param['Dim2Min'], param['Dim2Range'], param['Dim2Unit']]))
-        specMap = dict(zip(['maps'], [mapTable]))
-        offset = dict(zip(['offset'], [scanOffset]))
+        scanParam = dict(zip(['range','time/line','offset','rotation'],
+                             [scanRange,scanTime,scanOffset,scanRotation]))
+        specParam = dict(zip(['modFw','modBw','pauseFw','pauseBw','rangeFw','rangeBw','stop-by-value','maps'],
+                             [modFw,modBw,pauseFw,pauseBw,rangeFw,rangeBw,stopFw,mapTable]))
+        
 
-        parameters = dict(zip(['Tip', 'X', 'Y', 'Z', 'SpecMap', 'OffSet', 'Tune', 'Header Dump'],
-                              [cantilever, x, y, z, specMap, offset, thermal, header]))
+        parameters = dict(zip(['Tip', 'X', 'Y', 'Z', 'Scan', 'Spec', 'Tune', 'HeaderDump'],
+                              [cantilever, x, y, z, scanParam, specParam, thermal, header]))
 
         dataout = [image, spec, spectrum]
         datanames = ['Image', 'Spec', 'Sweep']
@@ -339,6 +403,7 @@ class nid_read():
         if self.__dataframe:
             # import pandas as pd
             self.data = toPandaDF(dataout).unstack(level=0)
+            self.data.dropna(inplace=True)
             # self.specunits = pd.DataFrame(specUnits)
             self.param = toPandaSeries(parameters)
         else:
@@ -348,15 +413,17 @@ class nid_read():
 
 class nhf_read():
     def __init__(self, filename=None):
-        self.filename = checkFileType(filename, 'nhf')
-        self.fopen = h5py.File(filename, 'r')
+        self.filename = filename
+        self.data = None
+        self.param = None
         self.read()
 
     def read(self):
 # measurement
-        group_name = list(self.fopen.keys())
+        fopen = h5py.File(self.filename, 'r')
+        group_name = list(fopen.keys())
         # forward/backward
-        segment = self.fopen[group_name[0]]
+        segment = fopen[group_name[0]]
         seg_names = list(segment.keys())
 
         s_prop = segment.attrs
@@ -429,6 +496,10 @@ def checkFileType(filename, cla):
     
 
 if __name__=="__main__":
-    filename='..\\example\\image.nhf'
-    afm=nhf_read(filename)
+    filename='..//example//Plotting_Data//MoS2.nid'
+    afm=read(filename,verbose=True)
+    print(afm.param)
+    
+    filename='..//example//2D_Plane_Removal//circles.nid'
+    afm=read(filename,verbose=True)
     print(afm.param)

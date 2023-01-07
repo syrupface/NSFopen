@@ -1,30 +1,32 @@
-from NSFopen.read import read as afmreader
+#!/usr/bin/env python
+# coding: utf-8
 
-import os
-from os import listdir
-from os.path import isfile, join
+# #### Import packages
+
+# In[1]:
+
+
+from NSFopen.read import read
 
 import numpy as np
-import math
 import collections
 
-import cv2 as cv
+import cv2 as cv  # aka opencv-python
 from PIL import Image
 
 import matplotlib
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from mpl_toolkits.axes_grid1.colorbar import colorbar
+from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 
 font = {'size': 12}
 matplotlib.rc('font', **font)
 
-dirpath = os.getcwd()
-onlyfiles = [f for f in listdir(dirpath) if isfile(join(dirpath, f)) and f.split(".")[-1] == "nid"]
-print(dirpath, "with", len(onlyfiles), "*.nid files")
-print(onlyfiles)
 
-# Define functions
+# #### Define functions
+
+# In[2]:
+
+
 def fittingFunc(matrix, xaxis, order):
     newmatrix = np.zeros(np.shape(matrix))
     for i in range(len(matrix)):
@@ -55,42 +57,62 @@ def laplacian_sharp(image, ddepth = cv.CV_16S, kernel_size=3, amount = 0.5):
     sharpened = (sharpened - armin)/(armax-armin)*255
     return sharpened
 
-# Define what to plot
-filename = 'grid1.nid'
-signal_to_plot = 'Z-Axis' # 'Phase', 'Amplitude', 'Z-Axis', 'Z-Axis Sensor' there could be more, i.e. 2nd lock-in signal, etc.
+
+# #### Set filename and define what to plot
+
+# In[3]:
+
+
+filename = 'grid.nid'
+
+signals = ['Topography','Z-Axis','Z-Axis Sensor'] # 'Amplitude', there could be more, i.e. 2nd lock-in signal, etc.
 scan_direction = 'Forward' # 'Forward', 'Backward', '2nd Forward', '2nd Backward'
-what_to_plot = 'Image' # 'Image', 'Spec' or 'Sweep'
+scan_to_plot = 'Image' # 'Image', 'Spec' or 'Sweep'
 fitting_order = 1 # order of the fitting polynom
 fitting = True # Use line fit or not
 
-#Build X, Y axes and read data
-alldata = afmreader(filename, verbose = False).data
-rawdata0 = alldata[what_to_plot][scan_direction][signal_to_plot]*1e9 # nm
-rawdata = np.array(rawdata0, dtype = 'float')
 
-param = afmreader(filename, verbose = False).param
+# #### Build X, Y axes and read data
+
+# In[4]:
+
+
+afm = read(filename, verbose = False)
+data = afm.data
+
+available_channels = list(data[scan_to_plot][scan_direction].index)
+signal_to_plot = [i for i in available_channels if i in signals][0]
+
+rawdata = data[scan_to_plot][scan_direction][signal_to_plot]*1e9 # nm
+
+param = afm.param
 xrange = param['X']['range'][0]
 yrange = param['Y']['range'][0]
 
 dict_key = filename.split(".nid")[0]
-xaxis = np.linspace(0, xrange*1E6, len(rawdata[0]))
-yaxis = np.linspace(0, yrange*1E6, len(rawdata))
+xaxis = np.linspace(0, xrange*1e6, len(rawdata[0]))
+yaxis = np.linspace(0, yrange*1e6, len(rawdata))
 
 if fitting:
     data = fittingFunc(rawdata, xaxis, fitting_order)
 else:
     data = rawdata
 
-#Prepare the figure and plot
+
+# #### Prepare the figure and plot
+
+# In[5]:
+
+
 force_limits = True # in case of glitches and spikes in the plots, make it False in the beginning
 
-xlbl = 'X (um)'
-ylbl = 'Y (um)'
-fig, axarr = plt.subplots(1, 1, figsize=(7.5,7))
+xlbl = 'X [$\mu$m]'
+ylbl = 'Y [$\mu$um]'
+fig, axarr = plt.subplots(1, 1, figsize=(7.5,7), dpi=300)
 
 vmin = -40
 vmax = 40
-cmap = plt.get_cmap('copper')
+cmap = 'afmhot'
 
 im = axarr.pcolormesh(xaxis, yaxis, data, cmap = cmap, shading='auto')
 if force_limits:
@@ -100,11 +122,16 @@ axarr.set_title(filename.split(".nid")[0])
 axarr.set(xlabel=xlbl, ylabel=ylbl)
 ax_divider = make_axes_locatable(axarr)
 cax = ax_divider.append_axes("right", size="5%", pad="2%")
-p = colorbar(im, cax=cax)
+p = plt.colorbar(im, cax=cax)
 p.ax.set_ylabel("Z (nm)")
 plt.show()
 
-# Change data to 0 - 255
+
+# #### Change data to 0 - 255
+
+# In[6]:
+
+
 for i in range(len(data)):
     for j in range(len(data[0])):
         if data[i,j] < vmin:
@@ -116,7 +143,12 @@ spread = 1/(vmax - vmin)
 imdata = (data-vmin)*spread*255
 imdata_new = np.uint8(imdata)
 
-# Sharpen
+
+# #### Sharpen
+
+# In[7]:
+
+
 img = Image.fromarray(imdata_new, 'L')
 img.save('img.jpg')
 
@@ -128,10 +160,15 @@ img_sharp_l = laplacian_sharp(img, ddepth = cv.CV_16S, kernel_size=3, amount = 0
 img_sharp_g = img_sharp_g/spread/255 + vmin # Bring back to the physical range
 img_sharp_l = img_sharp_l/spread/255 + vmin # Bring back to the physical range
 
-# Plot original and sharpened together
+
+# #### Plot original and sharpened together
+
+# In[8]:
+
+
 im_im = collections.OrderedDict()
 axnum = 0
-fig, axarr = plt.subplots(1, 3, figsize=(14,5))
+fig, axarr = plt.subplots(1, 3, figsize=(14,5), dpi=300)
 fig.tight_layout(pad=5.0)
 
 for ax in axarr:
@@ -154,8 +191,9 @@ for ax in axarr:
     
     ax_divider = make_axes_locatable(ax)
     cax = ax_divider.append_axes("right", size="5%", pad="2%")
-    p = colorbar(im_im[str(axnum)], cax=cax)
+    p = plt.colorbar(im_im[str(axnum)], cax=cax)
     if axnum == 2:
         p.ax.set_ylabel("Z (nm)")
     axnum += 1
 plt.show()
+

@@ -5,4 +5,4 @@ Created on Sat Oct 12 12:43:59 2019
 @author: Edward
 """
 
-from . read import nid_read, nhf_read
+from . read import read, nid_read, nhf_read
