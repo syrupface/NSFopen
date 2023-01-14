@@ -1,10 +1,10 @@
 # NSFopen
-Open Nanosurf NID files in Python
+Open Nanosurf NID and NHF files in Python
 
 ## Installing
 From source
 ```
-python -m build
+python setup.py --install
 ```
 or from PyPi
 ```
@@ -13,7 +13,9 @@ pip install nanosurf
 
 ## Prequisites
 numpy
+
 pandas (recommended, required for NHF for now)
+
 h5py (required for NHF files)
 
 

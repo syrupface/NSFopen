@@ -464,6 +464,7 @@ class nhf_read():
         
         self.data = toPandaDF(_data_out).unstack(level=0)
         self.param = pd.Series(prop_s)
+        fopen.close()
         
 
 def toPandaDF(user_dict):

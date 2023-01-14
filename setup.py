@@ -10,7 +10,7 @@ from setuptools import find_packages, setup
 
 setup(
     name='NSFopen',
-    version='2.1.0',
+    version='2.1.1',
     description='Read data and parameters from Nanosurf NID and NHF files',
     author='Nanosurf',
     author_email='scripting@nanosurf.com',
