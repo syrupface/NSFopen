@@ -1,10 +1,29 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Oct 12 12:43:59 2019
+"""Package for scripting the Nanosurf control software.
+Copyright (C) Nanosurf AG - All Rights Reserved (2021)
+License - MIT"""
 
-@author: Edward
-"""
+import os
+import pathlib
+from ._version import __version__
 
-# from . read import read
+from .read import read
+
 # from . process import process
-# from . example import example
+
+
+def package_path() -> pathlib.Path:
+    return pathlib.Path(os.path.dirname(os.path.abspath(__file__)))
+
+
+def example_path() -> pathlib.Path:
+    return package_path() / "example"
+
+
+def help():
+    print("Nanosurf NID and NHF file reader and image analysis:")
+    print("-------------------------------")
+    print(f"Installed version: {__version__}")
+    print("\nExamples are stored here:")
+    print(example_path())
+    for example in os.listdir(example_path()):
+        print(f"  {example}")

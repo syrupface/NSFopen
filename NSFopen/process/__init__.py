@@ -5,4 +5,5 @@ Created on Sat Oct 12 12:43:59 2019
 @author: Edward
 """
 
-from . process import process
+from . process import process, n_bins, OpError
+from . colormaps import colors

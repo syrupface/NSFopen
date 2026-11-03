@@ -1,189 +1,160 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# ## This script demonstrates how to open a Nanosurf Force Spectroscopy map and analyze the data using the DMT contact mechanics model 
+# # Analyzing a force spectroscopy map
+# 
+# This notebook opens a Nanosurf force map and fits every curve with the DMT contact mechanics model, to make maps of the
+# Young's modulus and the adhesion. Run it from this folder, next to `spectroscopy.nid`.
+# 
+# The tip radius and Poisson ratio below are assumptions: the modulus scales with them, so set them for your own sample.
 
 # In[1]:
 
 
-from NSFopen.read import read
+from NSFopen.process import process
 
 import numpy as np
-
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from scipy.optimize import curve_fit
 
 from glob import glob
+from pathlib import Path
 
-filename = 'spectroscopy.nid'
-filename_large = 'spectroscopy_large.nid'
+RADIUS = 10e-9  # tip radius in m
+NU = 0.35  # Poisson ratio, between 0.35 and 0.5
 
+filename = "spectroscopy.nid"
+
+
+# Set `USE_LARGE_MAP` to True to analyze a larger map, which is downloaded the first time.
 
 # In[2]:
 
 
-# If USE_LARGE_MAP is True, then it will use the larger force-curve map, downloading if not already locally available 
 USE_LARGE_MAP = False
 
+if USE_LARGE_MAP:
+    filename = "spectroscopy_large.nid"
+    if not Path(filename).exists():
+        import urllib.request
+
+        urllib.request.urlretrieve("https://www.dropbox.com/s/knzuh588g0uvjfi/spectroscopy_large.nid?dl=1", filename)
+
+
+# ## Read the file
+# 
+# The `Backward` modulation is the retract part of the curves, which holds the adhesion. The Z channel has a different name
+# on different systems.
 
 # In[3]:
 
 
-if USE_LARGE_MAP and filename_large not in glob('*nid'):
-    import urllib.request
-    urllib.request.urlretrieve("https://www.dropbox.com/s/knzuh588g0uvjfi/spectroscopy_large.nid?dl=1", filename_large)
-    filename = filename_large
-elif USE_LARGE_MAP:
-    filename = filename_large
+afm = process(filename, verbose=False)
+param = afm.param
 
+k = param.Tip.Prop0["Value"]  # spring constant in N/m
+
+curves = afm.data["Spec"]["Backward"]
+force = curves["Deflection"]  # in N
+z_channel = next(name for name in ("Z-Axis Sensor", "Z-AxisSensor", "Z-Axis") if name in curves.index)
+z = curves[z_channel]  # in m
+
+x_min, x_max, y_min, y_max, n_x, n_y = param.Spec.maps[:6]  # positions of the first and last points, number of points
+n_x, n_y = int(n_x), int(n_y)
+print(f"{len(force)} curves on a grid of {n_x} x {n_y}, k = {k:.2f} N/m")
+
+
+# ## The model
+# 
+# `tilt_removed` subtracts a line fitted to the part of the curve away from the surface. `dmt_fit` fits one curve from the
+# point of largest adhesion on; it returns NaN where the fit does not converge.
 
 # In[4]:
 
 
-# Read Date
-afm = read(filename, verbose=False)
-data = afm.data
-param = afm.param
+def tilt_removed(x, y, start=0.5, end=0.8):
+    i0, i1 = int(len(x) * start), int(len(x) * end)
+    return y - np.polyval(np.polyfit(x[i0:i1], y[i0:i1], 1), x)
 
-# probe
-k = param.Tip.Prop0['Value']  # spring constant
-sens = param.Tip.Sensitivity['Value']  # deflection sensitivity (if needed)
 
-radius = 10e-9  # tip radius
-nu = 0.35  # Poisson ratio (between 0.35 and 0.5)
+def dmt(x, modulus, contact, adhesion):
+    scale = 4 / 3 * modulus * np.sqrt(RADIUS) / (1 - NU**2)
+    x = x - contact
+    return scale * np.sign(x) * np.abs(x) ** 1.5 - adhesion
 
-spec_backward = data['Spec']['Backward']  # for DMT model we will use backward modulation
-d = spec_backward['Deflection']  # force channel
 
-z_signal = list(spec_backward.index)
-z_chans = ['Z-Axis Sensor', 'Z-AxisSensor', 'Z-Axis']  # depending on system, Z-Axis channel may be labeled differently
-available_chan = [i for i in z_signal if i in z_chans][0]
+def dmt_fit(separation, load):
+    start = int(len(load) * 0.8)
+    pull_off = load[start:].min()
+    i0 = np.flatnonzero(load == pull_off)[0]
+    try:
+        coefficients, _ = curve_fit(dmt, separation[i0:], load[i0:], p0=[1e9, separation[i0], -pull_off])
+    except (RuntimeError, ValueError):
+        return np.nan, None, i0
+    return max(coefficients[0], 0.0), coefficients, i0
 
-z = data['Spec']['Backward'][available_chan]  # Z-axis data
 
-sz = int(param.Spec.maps[4])  # Map size
-
-extent = param.Spec.maps[:4]  # X and Y physical dimensions of map
-
+# ## Fit all curves
+# 
+# The separation of tip and sample is the Z position minus the bending of the cantilever.
 
 # In[5]:
 
 
-## Functions
+loads = [tilt_removed(z_, f_) for z_, f_ in zip(z, force)]
+separations = [z_ - f_ / k for z_, f_ in zip(z, loads)]
 
-# corrects for any baseline tilt
-def baseline_correct(x, y, degree=1, start=0, end=0.5):
-    i0 = int(np.floor(len(x) * start))
-    i1 = int(np.floor(len(x) * end))
+modulus = np.array([dmt_fit(s, f)[0] for s, f in zip(separations, loads)])
+adhesion = np.array([-f.min() for f in loads])
 
-    xx = x[i0:i1]
-    yy = y[i0:i1]
-
-    p = np.polyfit(xx, yy, degree)
-
-    y -= np.polyval(p, x)
-    return y
+print(f"Modulus: median {np.nanmedian(modulus) / 1e9:.2f} GPa, {np.isnan(modulus).sum()} of {modulus.size} fits failed")
+print(f"Adhesion: median {np.median(adhesion) * 1e9:.1f} nN")
 
 
-# fits DMT model to data
-def DMT(x, *param):
-    elast, depth, wadh = param
-
-    scale = 4./3. * elast * np.sqrt(radius) / (1 - nu**2)
-    x = x - depth
-    y = scale * np.sign(x) * np.abs(x)**(3./2.) - wadh
-    return y
-
-
-def DMTfit(*args, maxForce=np.Inf):
-    import time
-    t = time.time()
-    # args are: [separation, load (force)]
-    if not isinstance(args[0], list):
-        args = [[ar] for ar in args]
-
-    E = []
-    for x, y in zip(*args):
-        # x = x - y / spring_constant  # separation
-        lenY = int(np.floor(len(y) * 0.8))
-        a = min(y[lenY:])  # adhesion
-    
-        i0 = np.where(y == a)[0][0]  # contact point estimator index
-        i1 = np.where(y > maxForce)[0]  # max force index
-
-        if i1.size == 0:
-            i1 = -1
-        else:
-            i1 = i1[0]
-
-        try:
-            coeff, var_matrix = curve_fit(DMT, x[i0:i1], y[i0:i1], p0=[1e9, x[i0], -a])
-        except RuntimeError:
-            E.append(np.nan)
-        else:
-            E.append(max(coeff[0], 0))
-
-    print('Elapsed Time: %3.2f sec\n' % (time.time() - t))
-    return np.array(E), (coeff, i0, i1)
-
+# ## Maps
+# 
+# The curves are in the order they were measured: every other line of the grid runs backward. `to_map` puts them in place.
+# Row 0 of a map is the first line scanned, like row 0 of the images, so `afm.origin` draws them the same way up. Gray
+# points of the modulus map are curves whose fit failed.
 
 # In[6]:
 
 
-# correct for tilt in baseline
-dd = [baseline_correct(z_, d_, start=0.5, end=0.8) for z_, d_ in zip(z, d)]
-
-# separation
-zz = [zz - dd/k for dd, zz in zip(dd, z)]
-
-# elastic modulus
-Eb, _ = DMTfit(zz, dd)
-Eb /= 1e9
-
-# adhesion
-adh = np.array([np.min(d) for d in dd]) * -1e9
+def to_map(values):
+    grid = np.reshape(values, (n_y, n_x)).copy()
+    grid[1::2] = grid[1::2, ::-1]
+    return grid
 
 
-# converts 1-D array to 2-D map and puts rows in correct order
-def toMap(arr, sz):
-    arr_ = np.reshape(arr, (sz, sz))
-    arr_[::2] = np.fliplr(arr_[::2])
-    return np.fliplr(arr_)
+half_x, half_y = (x_max - x_min) / (n_x - 1) / 2, (y_max - y_min) / (n_y - 1) / 2  # half a grid step at each side
+extent = (0, (x_max - x_min + 2 * half_x) * 1e6, 0, (y_max - y_min + 2 * half_y) * 1e6)
 
+colors = plt.get_cmap("afmhot").copy()
+colors.set_bad("0.7")
 
-Ebim = toMap(Eb, sz)
-Adh = toMap(adh, sz)
+fig, axes = plt.subplots(2, 3, figsize=(13, 7.5), layout="constrained", dpi=150, height_ratios=[3, 2])
 
+afm.flatten()
+afm.image(ax=axes[0, 0], color_range="p1", title="Height")
 
-# In[7]:
+for ax, values, label in ((axes[0, 1], modulus / 1e9, "Young's modulus [GPa]"), (axes[0, 2], adhesion * 1e9, "Adhesion [nN]")):
+    image = ax.imshow(to_map(values), extent=extent, origin=afm.origin, cmap=colors)
+    ax.set(xlabel="X [µm]", ylabel="Y [µm]", title=label.split(" [")[0])
+    fig.colorbar(image, ax=ax, label=label)
 
+# one curve with its fit, here the one with the median modulus
+index = int(np.nanargmin(np.abs(modulus - np.nanmedian(modulus))))
+coefficients, i0 = dmt_fit(separations[index], loads[index])[1:]
+s = separations[index]
+axes[1, 0].plot(s * 1e9, loads[index] * 1e9, label="Data")
+axes[1, 0].plot(s[i0:] * 1e9, dmt(s[i0:], *coefficients) * 1e9, label="DMT fit")
+axes[1, 0].set(xlabel="Separation [nm]", ylabel="Force [nN]", title=f"Curve {index}, around the contact",
+               xlim=((s[i0:].min() - 20e-9) * 1e9, (s[i0:].max() + 5e-9) * 1e9))
+axes[1, 0].legend(frameon=False)
 
-fig, ax = plt.subplots(2, 2, figsize=(10, 8), gridspec_kw={'height_ratios': [2, 1]}, dpi=300)
-fig.tight_layout(w_pad=8.0, h_pad=1.0)
-
-im = ax.copy()
-
-cmap = "afmhot"  # colormap
-xlbl = 'X [$\mu$m]'
-ylbl = 'Y [$\mu$m]'
-zlbl = ["Young's Modulus [GPa]", "Adhesion [nN]"]
-
-im[0, 0] = ax[0, 0].imshow(Ebim)
-im[0, 1] = ax[0, 1].imshow(Adh)
-im[1, 0] = ax[1, 0].hist(Eb)
-im[1, 1] = ax[1, 1].hist(adh)
-
-# sets labels and colorbar, etc.
-for i in range(2):
-    ax_divider = make_axes_locatable(ax[0, i])
-    cax = ax_divider.append_axes("right", size="5%", pad="2%")
-    cb = plt.colorbar(im[0, i], cax=cax)
-    cb.set_label(zlbl[i])
-
-    ax[0, i].set(xlabel=xlbl, ylabel=ylbl)
-    ax[1, i].set(xlabel=zlbl[i], ylabel='Counts')
-
-
+axes[1, 1].hist(modulus[np.isfinite(modulus)] / 1e9)
+axes[1, 1].set(xlabel="Young's modulus [GPa]", ylabel="Counts")
+axes[1, 2].hist(adhesion * 1e9)
+axes[1, 2].set(xlabel="Adhesion [nN]", ylabel="Counts")
 plt.show()
 

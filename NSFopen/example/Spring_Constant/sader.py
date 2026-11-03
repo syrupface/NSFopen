@@ -9,7 +9,11 @@ import numpy as np
 from scipy.special import kv as besselk
 
 
-def sader(L, W, *args):
+def sader(L, W, f0, Q):
+    """Spring constant in N/m of a rectangular cantilever in air by the Sader method.
+
+    L, W: length and width in m; f0: resonance frequency in Hz; Q: quality factor
+    """
     RHO = 1.18
     ETA = 1.86e-5
 
@@ -43,7 +47,7 @@ def sader(L, W, *args):
         G = Cfun(np.log10(Ren(f, b))) * Gcirc(f, b)
         return G
    
-    result = 0.1906 * (2 * np.pi * args[0])**2 * \
-             RHO * W**2 * L * args[1] * \
-             np.imag(Grect(2 * np.pi * args[0], W))
+    result = 0.1906 * (2 * np.pi * f0)**2 * \
+             RHO * W**2 * L * Q * \
+             np.imag(Grect(2 * np.pi * f0, W))
     return result

@@ -1,108 +1,91 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# ## Calculating Surface Roughness
-
-# This notebook demonstrates how to open a Nanosurf image file (*.nid) and calculate the roughness parameters of the surface.
+# # Calculating surface roughness
+# 
+# This notebook levels an image of sapphire and calculates its roughness: the areal parameters of ISO 25178, the height
+# distribution, the power spectrum, and the roughness along a single line. Run it from this folder, next to `sapphire.nid`.
 
 # In[1]:
 
 
-# import required modules
-from NSFopen.read import read
+from NSFopen.process import process
 
-import numpy as np
 import matplotlib.pyplot as plt
 
 
 # In[2]:
 
 
-# import the data
-data_file = "sapphire.nid"
-afm = read(data_file)
-data = afm.data
+afm = process("sapphire.nid")
+afm.flatten(order=1)  # subtract a line from every scan line
 
+fig = afm.image(color_range="p1")
+plt.show()
+
+
+# ## Surface parameters
+# 
+# `statistics()` returns a table with values and units. The values are in SI units. Sku follows ISO 25178, so it is 3 for
+# a Gaussian surface.
 
 # In[3]:
 
 
-# a function to flatten the image
-def flatten(data, order=1):
-    data_out = np.copy(data)  # create copy of data
-    for idx, line in enumerate(data_out):
-        x = np.arange(len(line))
-        p = np.polyfit(x, line, order)  # fit data to polynomial
-        y = np.polyval(p, x)
-        data_out[idx] = line - y  # subtract fit from data
-    return data_out
+table = afm.statistics()
+print(table)
 
+
+# ## Height distribution
+# 
+# `hist` returns a normal matplotlib figure, so anything can be added to it, here a box with the main parameters.
 
 # In[4]:
 
 
-Zaxis = data['Image']['Forward']['Z-Axis'] * 1e12  # height data scaled to picometers
+Sa, Sq, Ssk, Sku = table.loc[["Sa", "Sq", "Ssk", "Sku"], "value"]
 
-Zaxis_ = flatten(Zaxis, order=1)  # flatten data with 1st order polynomial (i.e. line)
+text = "\n".join((f"RMS (Sq): {Sq * 1e12:.1f} pm", f"Mean (Sa): {Sa * 1e12:.1f} pm",
+                  f"Skew (Ssk): {Ssk:.3f}", f"Kurtosis (Sku): {Sku:.3f}"))
+print(text)
 
+fig = afm.hist(bins=256, figsize=(6, 4))
+fig.axes[0].text(0.025, 0.95, text, va="top", transform=fig.axes[0].transAxes, fontsize=8,
+                 bbox=dict(boxstyle="round", facecolor="w", alpha=0.5))
+plt.show()
+
+
+# ## Bearing curve and power spectrum
+# 
+# The bearing curve shows how much of the surface lies above each height. The power spectral density shows at which
+# lengths the roughness sits.
 
 # In[5]:
 
 
-# calculate a number of surface parameters such as Sa, Sq, Skew and Kurtosis
-# definition of central moment
-def Mu(x, i):
-    return np.mean((x-x.mean())**i)
+fig, axes = plt.subplots(1, 2, figsize=(11, 4), layout="constrained", dpi=150)
+afm.plot_bearing(ax=axes[0], title="Bearing curve")
+afm.plot_psd(ax=axes[1], title="Power spectral density")
+plt.show()
 
-# mean deviation
-def Sa_(x):
-    return np.mean(np.abs(x-x.mean()))
 
-# RMS deviation
-def Sq_(x):
-    return np.sqrt(Mu(x, 2))
-
-# Skew
-def skew_(x):
-    return Mu(x, 3)/Mu(x, 2)**(3./2.)
-
-# Kurtosis
-def kurt_(x):
-    return Mu(x, 4)/Mu(x, 2)**2 - 3
-
-Sa = Sa_(Zaxis_)
-Sq = Sq_(Zaxis_)
-skew = skew_(Zaxis_)
-kurt = kurt_(Zaxis_)
-
-textstr = '\n'.join((
-    r'RMS (Sq): %5.1f pm' % (Sq, ),
-    r'Mean (Sa): %5.1f pm' % (Sa, ),
-    r'Skew (Ssk): %5.3f' % (skew, ),
-    r'Kurtosis (Sku): %5.3f' % (kurt, )))
-
-print(textstr)
-
+# ## Roughness along a line
+# 
+# A line cut, averaged over 5 pixels across the line, with its roughness after ISO 21920. End points are in m, as on the
+# axes of the image.
 
 # In[6]:
 
 
-fig, ax = plt.subplots(1, figsize=(6,4), dpi=300)
+width, height = afm.size()
+profile = afm.line_profile((0.1 * width, 0.5 * height), (0.9 * width, 0.5 * height), width=5)
 
-plt.hist(Zaxis_.flatten(), bins = 256);  # this flatten is the numpy function that converts a 2D array to 1D
-
-props = dict(boxstyle='round', facecolor='w', alpha=0.5)
-plt.text(0.025, 0.95, textstr, verticalalignment = 'top',
-         transform = ax.transAxes, fontsize=8, bbox = props)
-
-plt.xlabel('Z-Axis [pm]');
-plt.ylabel('[Counts]');
-
+fig, axes = plt.subplots(1, 2, figsize=(11, 4), layout="constrained", dpi=150)
+afm.image(ax=axes[0], profile=profile, color_range="p1")
+afm.plot_profile(profile, ax=axes[1], title="Line cut")
 plt.show()
 
-
-# In[ ]:
-
-
-
+roughness = afm.profile_roughness(profile).params
+for name in ("Ra", "Rq", "Rz"):
+    print(f"{name}: {roughness[name][0] * 1e12:.1f} pm")
 

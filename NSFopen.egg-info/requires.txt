@@ -1,3 +1,5 @@
-h5py
-pandas
+matplotlib>=3.6
 numpy
+scipy
+pandas
+h5py
