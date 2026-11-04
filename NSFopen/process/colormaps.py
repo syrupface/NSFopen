@@ -6,11 +6,15 @@ The Nanosurf color maps are defined here as color tables (position from 0 to 1, 
 `plt.imshow(height, cmap="Sky")`. `colormap(name)` returns a color map by name: a Nanosurf map, "BlueBlackRed", an
 older name (see ALIASES) or any matplotlib map.
 
-Gradient files of Gwyddion (share/gwyddion/gradients) are not part of NSFopen, but if you have them they can still be
-used: `colors(name, gwy_dir=folder).cmap` or `read_gradient(path)`.
+Gradient files of Gwyddion are not part of NSFopen, but an installed Gwyddion's are found and used (Windows, macOS,
+Linux; see gwyddion_dirs): `colors("Rainbow1").cmap`, `register(gwyddion=True)` adds them to matplotlib, and
+`gwyddion_gradients()` lists them. A folder of gradient files can also be given: `colors(name, gwy_dir=folder)`.
 """
 
+import os
 import pathlib
+import shutil
+import sys
 
 from matplotlib.colors import LinearSegmentedColormap
 
@@ -115,16 +119,86 @@ def colormap(name):
     raise ValueError(f"Unknown color map '{name}': use one of {', '.join(names())} or a matplotlib name.")
 
 
-def register():
-    """ Adds the Nanosurf maps and BlueBlackRed (and their reversed versions, name + '_r') to matplotlib; returns
-    their names. Calling it again does nothing. """
+def register(gwyddion=False):
+    """ Adds the Nanosurf maps and BlueBlackRed (and their reversed versions, name + '_r') to matplotlib; with
+    gwyddion=True also the gradients of an installed Gwyddion (a name that is taken gets ' (Gwyddion)'). Returns the
+    names. Calling it again does nothing new. """
     import matplotlib
-    for name in names():
+    out = names()
+    for name in out:
         if name not in matplotlib.colormaps:
             cmap = colormap(name)
             matplotlib.colormaps.register(cmap, name=name)
             matplotlib.colormaps.register(cmap.reversed(), name=name + "_r")
-    return names()
+    if gwyddion:
+        for name, path in gwyddion_gradients().items():
+            target = name if name not in matplotlib.colormaps else f"{name} (Gwyddion)"
+            if target not in matplotlib.colormaps:
+                try:
+                    cmap = LinearSegmentedColormap.from_list(target, read_gradient(path), N=256)
+                except (ValueError, OSError, UnicodeError):
+                    continue
+                matplotlib.colormaps.register(cmap, name=target)
+            out.append(target)
+    return out
+
+
+def gwyddion_dirs(platform=None, environ=None, home=None):
+    """ The gradient folders of an installed Gwyddion that exist, the user's own first (they win over the system ones).
+
+    Searched, after Gwyddion's documentation (resources: user folder ~/.gwyddion, on Windows %USERPROFILE%\\gwyddion;
+    system folder share/gwyddion, or $GWYDDION_DATADIR/gwyddion):
+        all          $GWYDDION_DATADIR/gwyddion/gradients; next to a gwyddion program on the PATH (../share/...)
+        Windows      %USERPROFILE%\\gwyddion, Documents\\gwyddion; Program Files (64 and 32 bit), %LOCALAPPDATA%\\Programs:
+                     Gwyddion\\share\\gwyddion\\gradients
+        macOS        ~/.gwyddion; Gwyddion.app in /Applications or ~/Applications; Homebrew, MacPorts, /usr/local
+        Linux, other ~/.gwyddion; /usr/share, /usr/local/share; Flatpak (system and user)
+    """
+    platform = platform or sys.platform
+    environ = os.environ if environ is None else environ
+    home = pathlib.Path(home) if home else pathlib.Path.home()
+    tail = pathlib.Path("gwyddion", "gradients")
+    user, system = [], []
+    if environ.get("GWYDDION_DATADIR"):
+        system.append(pathlib.Path(environ["GWYDDION_DATADIR"]) / tail)
+    program = shutil.which("gwyddion", path=environ.get("PATH")) if environ.get("PATH") else None
+    if program:
+        system.append(pathlib.Path(program).resolve().parent.parent / "share" / tail)
+    if platform.startswith("win"):
+        profile = pathlib.Path(environ.get("USERPROFILE", home))
+        user += [profile / "gwyddion" / "gradients", profile / "Documents" / "gwyddion" / "gradients"]
+        roots = [environ.get(k) for k in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")]
+        roots += [str(pathlib.Path(environ["LOCALAPPDATA"]) / "Programs")] if environ.get("LOCALAPPDATA") else []
+        roots += ["C:\\Program Files", "C:\\Program Files (x86)"]
+        system += [pathlib.Path(r) / "Gwyddion" / "share" / tail for r in roots if r]
+    elif platform == "darwin":
+        user.append(home / ".gwyddion" / "gradients")
+        apps = [pathlib.Path("/Applications"), home / "Applications"]
+        system += [a / "Gwyddion.app" / "Contents" / "Resources" / "share" / tail for a in apps]
+        system += [pathlib.Path(p) / tail for p in ("/opt/homebrew/share", "/opt/local/share", "/usr/local/share")]
+    else:
+        user.append(home / ".gwyddion" / "gradients")
+        flatpak = pathlib.Path("app", "net.gwyddion.Gwyddion", "current", "active", "files", "share") / tail
+        system += [pathlib.Path(p) / tail for p in ("/usr/share", "/usr/local/share")]
+        system += [pathlib.Path("/var/lib/flatpak") / flatpak, home / ".local" / "share" / "flatpak" / flatpak]
+    found = []
+    for folder in user + system:
+        try:
+            if folder.is_dir() and folder.resolve() not in [f.resolve() for f in found]:
+                found.append(folder)
+        except OSError:
+            pass
+    return found
+
+
+def gwyddion_gradients(**kwargs):
+    """ {name: path} of the gradient files of an installed Gwyddion (gwyddion_dirs; the user's own win). """
+    out = {}
+    for folder in gwyddion_dirs(**kwargs):
+        for path in sorted(folder.iterdir()):
+            if path.is_file() and path.name not in out:
+                out[path.name] = path
+    return out
 
 
 def read_gradient(path):
@@ -142,10 +216,10 @@ class colors:
     Parameters
     ----------
         name : string
-            A Nanosurf map (NANOSURF), "BlueBlackRed", an older name (ALIASES), a matplotlib map, or the name of a
-            gradient file in gwy_dir
+            A Nanosurf map (NANOSURF), "BlueBlackRed", an older name (ALIASES), a matplotlib map, the name of a
+            gradient file in gwy_dir, or of a gradient of an installed Gwyddion (gwyddion_dirs)
         gwy_dir : string, optional
-            Folder with Gwyddion gradient files (not part of NSFopen)
+            Folder with Gwyddion gradient files (not part of NSFopen); without it an installed Gwyddion is searched
     """
 
     def __init__(self, name=None, gwy_dir=None, **kwargs):
@@ -153,9 +227,13 @@ class colors:
         self.gwy_dir = pathlib.Path(gwy_dir) if gwy_dir else None
         self.cmap_list = {"Nanosurf": list(NANOSURF), "Custom": ["BlueBlackRed"]}
         if self.gwy_dir is not None and self.gwy_dir.is_dir():
-            self.cmap_list["Gwyddion"] = sorted(p.name for p in self.gwy_dir.iterdir() if p.is_file())
-        if name is not None and self.gwy_dir is not None and (self.gwy_dir / name).is_file():
-            self.cmap = LinearSegmentedColormap.from_list(name, read_gradient(self.gwy_dir / name))
+            files = {p.name: p for p in self.gwy_dir.iterdir() if p.is_file()}
+        else:
+            files = gwyddion_gradients()
+        if files:
+            self.cmap_list["Gwyddion"] = sorted(files, key=str.lower)
+        if name is not None and name in files and (self.gwy_dir is not None or name not in NANOSURF):
+            self.cmap = LinearSegmentedColormap.from_list(name, read_gradient(files[name]))
             return
         try:
             self.cmap = colormap(name)
