@@ -1,12 +1,22 @@
 # NSFopen
 Open and analyze Nanosurf NID and NHF files in Python: images, force spectroscopy and WaveMode NMA.
 
+## What's new in 2.4.0
+Compared to 2.3.0:
+- **Force curve analysis:** `process.spectroscopy` and `process.contact` fit force curves and force maps with Hertz,
+  Sneddon, DMT, JKR and Oliver-Pharr for sphere, cone, pyramid, flat punch and hyperboloid tips, with baseline and
+  interference removal, statistics, maps and CSV; `process.iv` analyzes I-V curves. The same calculations as the
+  Spectroscopy page of NSSA (NSF Surface and Spectroscopy Analyzer).
+- **Color maps of its own:** 12 named maps (`Sky`, `Warm`, `Flare`, ...) defined in the code; `register()` makes them
+  usable by name in matplotlib. The Gwyddion gradient files are no longer included, but an installed Gwyddion's are
+  found on Windows, macOS and Linux.
+
 ## What's new in 2.3.0
-Compared to 2.2.4, the previous version on PyPI:
+Compared to 2.2.4:
 - **Works by itself:** the `nanosurf` and `scikit-learn` packages are no longer needed.
 - **NHF spectroscopy and WaveMode NMA:** files of any size open immediately, and curves are read when asked for.
-- **Image analysis from the Nanosurf Surface Analyzer:** leveling, filters, masks, ISO statistics, line cuts, step heights,
-  critical dimension, PSD fits, lattice and grains.
+- **Image analysis from NSSA (then called Nanosurf Surface Analyzer):** leveling, filters, masks, ISO statistics, line
+  cuts, step heights, critical dimension, PSD fits, lattice and grains.
 - **Better figures:** units and labels from the file, subplots with `ax=`, a new 3D plot, and plots of the analysis results.
 - **Examples rewritten,** with several bugs fixed. The `Spring_Constant` result changes from 14.5 to 24.0 N/m, because the
   old fit used the wrong formula.
@@ -35,7 +45,7 @@ is a notebook with its `.py` and `.html`, to run from its own folder:
 | `Plane_Removal` | Leveling all the files of a folder |
 | `Grain_Analysis` | Finding features and measuring each of them |
 | `Lateral_Force` | Friction from the forward and backward scans |
-| `Force_Spectroscopy` | Fitting a force map with the DMT model |
+| `Force_Spectroscopy` | Fitting a force map with the DMT model; `Contact_Models.py`: the same with `process.spectroscopy`, maps and the quality filter |
 | `Spring_Constant` | Sader method from a thermal tune |
 | `Sharpen_Image` | Your own processing on the arrays, stored back as channels |
 

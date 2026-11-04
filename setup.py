@@ -17,18 +17,23 @@ def load_version(readme_file_path: str) -> str:
     version = version.replace('"', "").replace(" ", "")
     return version
 
+SKIP_FILES = {'tokens.json', '.env'}              # credentials never go into the package
+SKIP_SUFFIXES = ('.pyc', '.token')
+
+
 def package_files(directory):
     paths = []
     for (path, directories, filenames) in os.walk(directory):
         if '__pycache__' in path or '.ipynb_checkpoints' in path:
             continue
         for filename in filenames:
+            if filename in SKIP_FILES or filename.endswith(SKIP_SUFFIXES):
+                continue
             paths.append(os.path.join('..', path, filename))
     return paths
 
 package_data_files = []
 package_data_files += package_files('NSFopen/example')
-package_data_files += package_files('NSFopen/process/gradients')
 
 long_description_file = load_doc_file('README.md')
 

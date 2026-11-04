@@ -1,6 +1,44 @@
 # Change log
 
-## 2.3.0 (not yet released)
+## 2.4.0 (not yet released)
+
+Compared to **2.3.0**.
+
+### Force spectroscopy analysis
+Added, in `NSFopen.process` (the calculations of the Spectroscopy page of NSSA, the NSF Surface and Spectroscopy
+Analyzer, so a script and the program give the same numbers):
+- `contact`: elastic contact of a tip pressed into a flat sample. Models Hertz, Sneddon (exact), DMT, JKR and
+  Oliver-Pharr; tip shapes sphere, cone, four-sided pyramid, flat cylinder punch and hyperboloid. `fit_elastic`,
+  `fit_jkr`, `fit_oliver_pharr` give the Young's modulus, reduced modulus, contact point, adhesion and the fit quality.
+- `spectroscopy`: `SpecFile` opens the force curves and force maps of NID and NHF files. `ForceSettings` and
+  `ForceAnalysis` process them: smoothing, baseline (offset, tilt, or an interference sine with its period found),
+  contact point, indentation, adhesion, pull-off, adhesion and dissipated energy, and the model fit. `Results` has
+  statistics, maps, masks, fits of different models on different regions, a quality filter (leave out fits below an R²)
+  and CSV export. Maps can be analyzed partly (every n-th line and column, or a region).
+- `iv`: I-V curves with dI/dV, normalized conductance, zero-bias conductance and resistance, gap and rectification.
+
+### Color maps
+- 12 maps are defined in `colormaps.py` (`NANOSURF`): Sky (the default for heights), Warm, Flare, Caribbean, Strata,
+  Gold, Digitalis, Neon, Plum, Cold, Spectrum and Maple, plus BlueBlackRed. `register()` adds them and their reversed
+  versions (`Sky_r`) to matplotlib; `colormap(name)` returns any of them or a matplotlib map.
+- The 59 Gwyddion gradient files that 2.3.0 included are removed: they are GPL, NSFopen is MIT. An installed Gwyddion's
+  gradients are found on Windows, macOS and Linux (`gwyddion_dirs`, `gwyddion_gradients`, `register(gwyddion=True)`), and
+  `colors(name)` uses them when the name is not one of the 12.
+
+### Changes that can affect existing scripts
+| What | 2.3.0 | 2.4.0 |
+|---|---|---|
+| `colors(name)` with a Gwyddion name | 59 gradient files in the package | 12 maps defined in the code; `Pm3d`, `Blend2`, `Code-V` open as `Flare`, `Strata`, `Spectrum`; the others only with an installed Gwyddion or `gwy_dir=` |
+| `colormaps.GRADIENTS` | The gradient folder | Removed |
+
+### Examples
+- New `Force_Spectroscopy/Contact_Models.py`: a force map fitted with `process.spectroscopy`, with statistics, the
+  quality filter, maps of the modulus and adhesion, and the stiffest curve with its fit.
+
+### Packaging
+- Credentials (`tokens.json`, `.env`, `*.token`) in the example folders are never packaged.
+
+## 2.3.0 (November 2, 2026)
 
 Compared to **2.2.4**, the latest version on PyPI (August 2024).
 
@@ -9,7 +47,7 @@ Compared to **2.2.4**, the latest version on PyPI (August 2024).
 - NID files are read about 5 times faster, and line flattening is about twice as fast.
 - NHF spectroscopy files of any size open immediately, and their curves are read when asked for.
 - WaveMode NMA files are read, with a curve for every pixel and maps of any quantity.
-- `process` has many new image analysis functions, brought over from the Nanosurf Surface Analyzer.
+- `process` has many new image analysis functions, brought over from the Nanosurf Surface Analyzer (now NSSA).
 - Figures take their units and labels from the file, can be placed in subplots, and there is a new 3D plot.
 
 ### Reading files

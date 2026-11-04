@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.venv*/
+
+# build output (made by pip_upload.bat / python -m build; only the upload goes to PyPI)
+build/
+dist/
+*.egg-info/
+
+# local copies and backups
+_pre_rework_backup/
+
+# credentials: never commit these
+tokens.json
+*.token
+.env

@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: NSFopen
-Version: 2.3.0
+Version: 2.4.0
 Summary: Python module to open and analyze Nanosurf NID and NHF files
 Author: Nanosurf AG
 Author-email: scripting@nanosurf.com
