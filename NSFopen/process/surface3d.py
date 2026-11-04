@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 
 from . import ops
-from .colormaps import GRADIENTS, colors
+from . import colormaps
 
 # ---- materials (ambient, diffuse, specular RGB, shininess), after the classic OpenGL material table ----
 
@@ -43,15 +43,8 @@ CHUNK = 4_000_000                                   # candidate pixels handled a
 
 
 def colormap(cmap):
-    """ A matplotlib color map from a matplotlib name, a gradient of this package, or a color map itself. """
-    import matplotlib
-    if not isinstance(cmap, str):
-        return cmap
-    if cmap in matplotlib.colormaps:
-        return matplotlib.colormaps[cmap]
-    if (GRADIENTS / cmap).is_file() or cmap == "BlueBlackRed":
-        return colors(cmap).cmap
-    raise ValueError(f"Unknown color map '{cmap}': use a matplotlib name or one of colors().cmap_list.")
+    """ A matplotlib color map from a matplotlib name, a Nanosurf map of colormaps.py, or a color map itself. """
+    return colormaps.colormap(cmap)
 
 
 def material_of(material) -> tuple:
