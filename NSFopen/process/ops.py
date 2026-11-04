@@ -388,6 +388,21 @@ def _rolled(data: np.ndarray, radius: float, dx: float, dy: float, axes: tuple) 
     return out[py:py + ny, px:px + nx]
 
 
+@_op("level.terraces", "Terrace level", smoothing=2.0, low=1.0, high=3.0, broaden=2, min_area=80, degree=3,
+     edges="auto")
+def level_terraces(state, resolve, smoothing, low, high, broaden, min_area, degree, edges):
+    """ Subtracts the background (tilt, bow) of a stepped surface found by the terrace analysis (terraces.py): the
+        terraces become flat and the steps stay, unlike a polynomial fit, which tilts a staircase. """
+    from . import terraces
+    if state.unit != "m":
+        raise OpError("Terrace leveling needs a height channel (heights in m).")
+    settings = terraces.TerraceSettings(smoothing=float(smoothing), low=float(low), high=float(high),
+                                        broaden=int(broaden), min_area=int(min_area), degree=int(degree), edges=edges)
+    result = terraces.terraces(state, settings)
+    state.data = state.data - result.background
+    return state
+
+
 @_op("level.rolling_ball", "Rolling ball background", radius=5e-6, shape="sphere", direction="both", invert=False)
 def level_rolling_ball(state, resolve, radius, shape, direction, invert):
     """ Rolls a ball (shape 'sphere') or a cylinder ('arc', along the rows, the columns, or both one after the other)

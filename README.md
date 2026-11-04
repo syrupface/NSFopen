@@ -1,6 +1,12 @@
 # NSFopen
 Open and analyze Nanosurf NID and NHF files in Python: images, force spectroscopy and WaveMode NMA.
 
+## What's new in 2.5.0
+Compared to 2.4.0:
+- **Terrace analysis:** `process.terraces()` finds the terraces of a stepped surface and their common step height, with
+  the background fitted together with the terraces; `level_terraces()` levels a staircase without tilting it.
+- **Curvature:** `process.curvature()` gives the principal radii of curvature, their directions, the center and the bow.
+
 ## What's new in 2.4.0
 Compared to 2.3.0:
 - **Force curve analysis:** `process.spectroscopy` and `process.contact` fit force curves and force maps with Hertz,

@@ -21,6 +21,7 @@ from NSFopen.read import read
 
 from . import combine as _combine
 from . import fitting, grains as _grains, measure, ops, profile_iso, psdfit, surface3d
+from . import terraces as _terraces
 
 OpError = ops.OpError
 
@@ -492,6 +493,15 @@ class process:
     def lattice(self, direction="Forward", channel="Z-Axis", region="all", a=None, b=None, refine=True):
         """Lattice vectors of a periodic image from its autocorrelation; see .summary()."""
         return measure.lattice(self._view(direction, channel), region, a, b, refine)
+
+    def curvature(self, direction="Forward", channel="Z-Axis", region="all"):
+        """Radii of curvature, their directions, center and bow from a quadratic fit; see .summary()."""
+        return measure.curvature(self._view(direction, channel), region)
+
+    def terraces(self, direction="Forward", channel="Z-Axis", **settings):
+        """Terrace analysis of a stepped surface: terraces, step height, background; see .summary().
+        settings: smoothing, low, high, broaden, min_area, degree, step (m), edges ('auto', 'mask', 'both')."""
+        return _terraces.terraces(self._view(direction, channel), _terraces.TerraceSettings(**settings))
 
     # ---- grains ----
 

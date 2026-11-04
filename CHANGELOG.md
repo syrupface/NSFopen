@@ -1,6 +1,25 @@
 # Change log
 
-## 2.4.0 (not yet released)
+## 2.5.0 (not yet released)
+
+Compared to **2.4.0**.
+
+### Terraces and curvature
+Added, in `NSFopen.process` (the calculations of NSSA's *Curvature* and *Terrace analysis* tools):
+- `terraces.terraces(state, TerraceSettings(...))` and `process.terraces()`: a stepped surface divided into terraces at
+  the steps (found from the local slopes, or given as the mask), a polynomial background fitted together with one height
+  per terrace, and the common step height of which the terrace heights are integer multiples (or a given one), with its
+  standard error. `TerraceResult` has the terraces (height, level, area, roughness), the labels of every pixel, the
+  background, `leveled()`, `summary()` and `rows()`. Only numpy and scipy are used.
+- Operation `level.terraces` (`process.level_terraces()`): subtracts that background, so the terraces become flat and the
+  steps stay.
+- `measure.curvature(state, region)` and `process.curvature()`: principal radii of curvature, their directions, the center
+  and the bow from a quadratic fit; `Curvature.summary()`, `rows()`, `profile()`.
+- Tests: `tests/test_terraces_curvature.py` (synthetic staircases, spheres, an elliptic dome, a cylinder).
+
+### Fixed
+- Reading a NID file gave a pandas warning (`Series.dropna(inplace=True)` is deprecated from pandas 3.1).
+
 
 Compared to **2.3.0**.
 
@@ -38,7 +57,9 @@ Analyzer, so a script and the program give the same numbers):
 ### Packaging
 - Credentials (`tokens.json`, `.env`, `*.token`) in the example folders are never packaged.
 
-## 2.3.0 (November 2, 2026)
+## 2.3.0 (November 2, 2026, yanked on PyPI)
+
+Yanked because the package included the GPL-licensed Gwyddion gradient files; use 2.4.0.
 
 Compared to **2.2.4**, the latest version on PyPI (August 2024).
 
