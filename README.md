@@ -1,6 +1,9 @@
 # NSFopen
 Open and analyze Nanosurf NID and NHF files in Python: images, force spectroscopy and WaveMode NMA.
 
+## What's new in 2.4.1
+A fix: reading NID files no longer gives a pandas warning (pandas 3.1 and newer).
+
 ## What's new in 2.4.0
 Compared to 2.3.0:
 - **Force curve analysis:** `process.spectroscopy` and `process.contact` fit force curves and force maps with Hertz,

@@ -524,7 +524,7 @@ class nid_read:
         if self.__dataframe:
             # import pandas as pd
             self.data = toPandaDF(dataout).unstack(level=0)
-            self.data.dropna(inplace=True)
+            self.data = self.data.dropna()          # not inplace=True: deprecated from pandas 3.1 (PDEP-8)
             # self.specunits = pd.DataFrame(specUnits)
             self.param = toPandaSeries(parameters)
         else:

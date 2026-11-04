@@ -1,6 +1,12 @@
 # Change log
 
-## 2.4.0 (not yet released)
+## 2.4.1 (November 4, 2026)
+
+### Fixed
+- Reading a NID file gave a pandas warning (`Series.dropna(inplace=True)` is deprecated from pandas 3.1). The data is
+  the same.
+
+## 2.4.0 (November 4, 2026)
 
 Compared to **2.3.0**.
 
@@ -38,7 +44,9 @@ Analyzer, so a script and the program give the same numbers):
 ### Packaging
 - Credentials (`tokens.json`, `.env`, `*.token`) in the example folders are never packaged.
 
-## 2.3.0 (November 2, 2026)
+## 2.3.0 (November 2, 2026, yanked on PyPI)
+
+Yanked because the package included the GPL-licensed Gwyddion gradient files; use 2.4.0 or newer.
 
 Compared to **2.2.4**, the latest version on PyPI (August 2024).
 
