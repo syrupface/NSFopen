@@ -14,8 +14,28 @@ Added, in `NSFopen.process` (the calculations of NSSA's *Curvature* and *Terrace
 - Operation `level.terraces` (`process.level_terraces()`): subtracts that background, so the terraces become flat and the
   steps stay.
 - `measure.curvature(state, region)` and `process.curvature()`: principal radii of curvature, their directions, the center
-  and the bow from a quadratic fit; `Curvature.summary()`, `rows()`, `profile()`.
+  and the bow from a quadratic fit; `Curvature.summary()`, `rows()`, `profile()`. `center=(x, y)` fixes the vertex of
+  the fit at a given point instead of finding it.
+- `measure.extreme_point(state, region, which)`: the highest or lowest point of the region (smoothed), e.g. as the center
+  of the curvature.
 - Tests: `tests/test_terraces_curvature.py` (synthetic staircases, spheres, an elliptic dome, a cylinder).
+
+### Contact models
+- `contact.fit_maugis()`, model `maugis` (Maugis-Dugdale, sphere, retract curve): E*, the work of adhesion W and the
+  Maugis parameter λ, with the Tabor parameter μ = 1.157 λ and the adhesive stress σ0 in the values;
+  `maugis_reduced()`, `maugis_force()`.
+- Bottom-effect correction of thin samples on a hard substrate for Hertz, Sneddon and DMT: `Tip(thickness=, bonded=)`,
+  `contact.bottom_factor()`; sphere after Dimitriadis et al. 2002 (bonded or not, any ν), cone, pyramid and cylinder
+  punch after Garcia and Garcia 2018 (bonded). `ForceSettings.thickness_mode` (`off`, `fixed`, `map`), `thickness`,
+  `substrate`, `bonded`: in `map` the thickness of a curve is its height (contact) above the substrate height;
+  `spectroscopy.substrate_height()` takes that from curves on the substrate. The fit values get `sample thickness`,
+  `bottom χ`, `bottom factor`.
+- `spectroscopy.complete_model()`: model settings saved before 2.5.0 get the defaults of the new fields.
+- Tests: `tests/test_contact_models.py`.
+
+### Changed
+- Spectroscopy results: the column `fit region` is now `model region` (`spectroscopy.REGION`), to match NSSA's
+  *Model regions*.
 
 ### Fixed
 - Reading a NID file gave a pandas warning (`Series.dropna(inplace=True)` is deprecated from pandas 3.1).

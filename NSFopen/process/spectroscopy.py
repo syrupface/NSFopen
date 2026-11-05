@@ -548,9 +548,23 @@ class ForceSettings:
     fit_max_force: float = 100.0            # %: approach fits use the points up to this share of the maximum force
     op_lower: float = 20.0                  # %: Oliver-Pharr fit range of the unloading curve
     op_upper: float = 95.0
+    thickness_mode: str = "off"             # bottom effect: off (thick sample), fixed, map (from the contact height)
+    thickness: float = 5e-6                 # m: the sample thickness (fixed)
+    substrate: float = 0.0                  # m: height (contact) of the substrate (map: thickness = height - this)
+    bonded: bool = True                     # the sample is bonded to the substrate
 
-    def tip(self) -> contact.Tip:
-        return contact.Tip(self.shape, self.radius, self.half_angle, self.poisson)
+    def tip(self, thickness: float = math.inf) -> contact.Tip:
+        return contact.Tip(self.shape, self.radius, self.half_angle, self.poisson, thickness, bool(self.bonded))
+
+    def thickness_at(self, contact_x: float) -> float:
+        """ The sample thickness for the bottom-effect correction at a curve whose contact is at the piezo position
+            contact_x: inf (off), the fixed value, or (map) its height above the substrate, i.e.
+            -contact_x - substrate. NaN: the curve has no contact point (map); <= 0: on the substrate. """
+        if self.thickness_mode == "fixed":
+            return float(self.thickness)
+        if self.thickness_mode == "map":
+            return -float(contact_x) - float(self.substrate) if math.isfinite(contact_x) else math.nan
+        return math.inf
 
 
 @dataclasses.dataclass
@@ -683,7 +697,17 @@ class ForceAnalysis:
 
     def fit(self, curve: ForceCurve):
         s = self.settings
-        tip = s.tip()
+        thickness = s.thickness_at(curve.contact_x)
+        if s.thickness_mode != "off" and s.model not in contact.BOTTOM_MODELS:
+            curve.error = (f"The bottom-effect correction is for Hertz, Sneddon and DMT, not "
+                           f"{dict(contact.MODELS)[s.model]}: set the sample to thick.")
+            return
+        if s.thickness_mode == "map" and not math.isfinite(thickness):
+            curve.error = "No contact point on the approach curve: the sample thickness is not known."
+            return
+        if thickness <= 0:                       # on (or below) the substrate: nothing to correct
+            thickness = math.inf
+        tip = s.tip(thickness)
         segment = contact.MODEL_SEGMENT[s.model] if s.fit_segment == "auto" else s.fit_segment
         curve.fit_segment = segment
         data = curve.approach if segment == APPROACH else curve.retract
@@ -700,6 +724,9 @@ class ForceAnalysis:
             elif s.model == "jkr":
                 delta, force = _retract_through_pull_off(data)
                 curve.fit = contact.fit_jkr(delta, force, tip)
+            elif s.model == "maugis":
+                delta, force = _retract_through_pull_off(data)
+                curve.fit = contact.fit_maugis(delta, force, tip)
             elif s.model == "oliver_pharr":
                 zero = curve.contact_delta
                 if not math.isfinite(zero):
@@ -809,26 +836,52 @@ def _measure(curve: ForceCurve):
 
 # ---- results of many curves ----
 
-REGION = "fit region"                  # 0: the settings of all curves, 1, 2, ...: the regions fitted with other settings
+REGION = "model region"                # 0: the settings of all curves, 1, 2, ...: the regions fitted with other settings
 MODEL_FIELDS = ("model", "shape", "radius", "half_angle", "poisson", "fit_segment", "fit_max_force", "op_lower",
-                "op_upper")            # what a fit region sets; the processing (filter, baseline, k) is the same for all
+                "op_upper", "thickness_mode", "thickness", "substrate", "bonded")            # what a model region sets; the processing (filter, baseline, k) is the same for all
 
 
 def model_settings(settings: ForceSettings) -> dict:
     return {name: getattr(settings, name) for name in MODEL_FIELDS}
 
 
+def complete_model(model: dict) -> dict:
+    """ A model dict with every MODEL_FIELDS entry (older files lack the newer ones: their defaults). """
+    defaults = model_settings(ForceSettings())
+    return {name: model.get(name, defaults[name]) for name in MODEL_FIELDS}
+
+
 def describe_model(model: dict) -> str:
-    """ 'JKR, sphere R 20 nm, ν 0.5' """
+    """ 'JKR, sphere R 20 nm, ν 0.5' (with ', thin 3 µm, bonded' or ', thin from the height' for the bottom
+        effect) """
     from . import contact as _contact
+    model = complete_model(model)
     shape = dict(_contact.SHAPES).get(model["shape"], model["shape"]).lower()
     geometry = []
     if model["shape"] in ("sphere", "hyperboloid", "punch"):
         geometry.append(f"R {format_value(model['radius'], 'm', 3)}")
     if model["shape"] in ("cone", "pyramid", "hyperboloid"):
         geometry.append(f"{model['half_angle']:g}°")
-    return f"{dict(_contact.MODELS)[model['model']]}, {shape} {' '.join(geometry)}, ν {model['poisson']:g}".replace(
-        "  ", " ")
+    text = f"{dict(_contact.MODELS)[model['model']]}, {shape} {' '.join(geometry)}, ν {model['poisson']:g}"
+    if model["thickness_mode"] != "off":
+        thin = (f"thin {format_value(model['thickness'], 'm', 3)}" if model["thickness_mode"] == "fixed"
+                else f"thin from the height (substrate {format_value(model['substrate'], 'm', 3)})")
+        text += f", {thin}, {'bonded' if model['bonded'] else 'not bonded'}"
+    return text.replace("  ", " ")
+
+
+def substrate_height(analysis: "ForceAnalysis", indices) -> float:
+    """ Median height (contact) of the given curves, e.g. the masked ones on the substrate: the 'substrate' of the
+        bottom-effect correction from the height. NaN if none has a contact point. """
+    heights = []
+    for n in indices:
+        try:
+            curve = analysis.curve(int(n), fit=False)
+        except SpecError:
+            continue
+        if math.isfinite(curve.contact_x):
+            heights.append(-curve.contact_x)
+    return float(np.median(heights)) if heights else math.nan
 
 class Results:
     """ The values of many curves: rows (dicts) in curve order, statistics and maps. """

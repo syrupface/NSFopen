@@ -6,6 +6,9 @@ Compared to 2.4.0:
 - **Terrace analysis:** `process.terraces()` finds the terraces of a stepped surface and their common step height, with
   the background fitted together with the terraces; `level_terraces()` levels a staircase without tilting it.
 - **Curvature:** `process.curvature()` gives the principal radii of curvature, their directions, the center and the bow.
+- **Maugis-Dugdale** contact model for adhesive samples between DMT and JKR (modulus, work of adhesion, Maugis
+  parameter), and the **bottom-effect correction** of Hertz, Sneddon and DMT for thin samples on a hard substrate
+  (cells, gels, films), with one thickness or the height of every curve of a map.
 
 ## What's new in 2.4.0
 Compared to 2.3.0:
