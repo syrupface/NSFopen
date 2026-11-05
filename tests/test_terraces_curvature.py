@@ -102,3 +102,44 @@ def test_curvature_of_known_surfaces():
     assert "cylinder" in c.summary()
     with pytest.raises(ops.OpError, match="height channel"):
         measure.curvature(ops.State(z, np.zeros(z.shape, bool), size, size, "V"))
+
+
+def test_curvature_with_the_center_given():
+    """ The vertex fixed at a given center: same radii as the free fit when it is the true center; with a tilt, which
+    moves the free center, the given apex still gives the radii, and the rms shows the tilt it cannot follow. """
+    n, size = 200, 10e-6
+    yy, xx = np.mgrid[0:n, 0:n]
+    x, y = (xx + 0.5) * size / n, (yy + 0.5) * size / n
+    z = ((x - 4e-6) ** 2 + (y - 5e-6) ** 2) / (2 * 40e-6)
+    c = measure.curvature(_state(z, size), center=(4e-6, 5e-6))
+    assert c.manual_center and "(set by hand)" in c.summary()
+    assert c.radius_1 == pytest.approx(40e-6, rel=1e-9) and c.radius_2 == pytest.approx(40e-6, rel=1e-9)
+    assert c.center == (4e-6, 5e-6) and c.center_z == pytest.approx(0, abs=1e-15)
+    tilted = z + 2e-3 * x
+    free = measure.curvature(_state(tilted, size))
+    assert free.center[0] == pytest.approx(4e-6 - 2e-3 * 40e-6, abs=1e-9)       # the tilt moves the free center
+    fixed = measure.curvature(_state(tilted, size), center=(4e-6, 5e-6))
+    assert fixed.radius_2 == pytest.approx(40e-6, rel=1e-6)                    # along y the tilt does nothing
+    assert fixed.rms > 1e-9 > free.rms
+    # the same coefficients describe the surface: the free-form solution of a fixed fit gives back the center
+    a, b, c_, d, e, f = fixed.coefficients
+    hessian = np.array([[2 * d, e], [e, 2 * f]])
+    offset = np.linalg.solve(hessian, -np.array([b, c_]))
+    assert offset + [size / 2, size / 2] == pytest.approx([4e-6, 5e-6], abs=1e-12)
+
+
+def test_extreme_point():
+    """ The highest / lowest point of an off-center dome, through noise; and of the masked part only. """
+    n, dx = 100, 1e-7
+    y, x = (np.mgrid[0:n, 0:n] + 0.5) * dx
+    dome = -((x - 3e-6) ** 2 + (y - 7e-6) ** 2) / 1e-4
+    data = dome + 3e-10 * np.random.default_rng(2).standard_normal(dome.shape)
+    state = ops.State(data, np.zeros(data.shape, bool), n * dx, n * dx, "m")
+    cx, cy = measure.extreme_point(state)
+    assert abs(cx - 3e-6) < 3 * dx and abs(cy - 7e-6) < 3 * dx
+    cx, cy = measure.extreme_point(ops.State(-data, state.mask, n * dx, n * dx, "m"), which="min")
+    assert abs(cx - 3e-6) < 3 * dx and abs(cy - 7e-6) < 3 * dx
+    mask = np.zeros(data.shape, bool)
+    mask[:, 60:] = True                                  # the top of the dome is outside: the edge of the mask
+    cx, _ = measure.extreme_point(ops.State(data, mask, n * dx, n * dx, "m"), "masked")
+    assert cx == pytest.approx(60.5 * dx)
