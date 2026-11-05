@@ -299,10 +299,11 @@ def _check(delta, force, minimum=6):
     return delta[good], force[good]
 
 
-def _search(cost, low: float, high: float, grid: int = 60) -> float:
-    """ Minimum of a 1D cost over [low, high]: a grid, then a bounded refinement around the best grid point. """
+def _search(cost, low: float, high: float, grid: int = 60, costs_of=None) -> float:
+    """ Minimum of a 1D cost over [low, high]: a grid, then a bounded refinement around the best grid point.
+        costs_of(xs): the costs of all grid points at once (vectorized), if given. """
     xs = np.linspace(low, high, grid)
-    costs = np.array([cost(x) for x in xs])
+    costs = costs_of(xs) if costs_of is not None else np.array([cost(x) for x in xs])
     best = int(np.nanargmin(costs))
     lo, hi = xs[max(best - 1, 0)], xs[min(best + 1, grid - 1)]
     if hi <= lo:
@@ -341,7 +342,16 @@ def fit_elastic(delta, force, tip: Tip, model: str = "hertz") -> FitResult:
     def cost(delta0):
         return float(np.sum((force - solve(delta0)[2]) ** 2))
 
-    delta0 = _search(cost, low, high)
+    def costs_of(xs):                   # the grid at once: one row of g per contact point
+        g = unit_force(delta[None, :] - xs[:, None], tip, exact)
+        target = force + f_ad
+        norm = np.einsum("ij,ij->i", g, g)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            e_star = np.where(norm > 0, np.maximum(g @ target / norm, 0.0), 0.0)
+        residual = force[None, :] - (e_star[:, None] * g - f_ad)
+        return np.einsum("ij,ij->i", residual, residual)
+
+    delta0 = _search(cost, low, high, costs_of=costs_of if delta.size * 60 <= 4_000_000 else None)
     e_star, f_ad, model_force = solve(delta0)
     if not (e_star > 0 and math.isfinite(e_star)):
         raise FitError("No contact found: the force does not rise with the indentation.")
@@ -367,24 +377,75 @@ def _no_bottom(tip: Tip, name: str):
 
 # ---- JKR (sphere, retract) ----
 
+_JKR_Q_MIN = -(27.0 / 256.0) ** (1.0 / 3.0)     # reduced delta at the turning point: no contact below
+
+
+def _jkr_unit(h, w: float, derivatives: bool = False):
+    """ JKR force / (E* R²) at the indentations h / R (stable branch, 0 where detached) for w = W / (E* R), exact.
+        With a = c u², c = (2 pi w)^(1/3): delta = c² (u⁴ - u), F = c³ (4/3 u⁶ - 2 u³). u⁴ - u = q = delta / c² is
+        solved in closed form (Ferrari): u = (s + sqrt(2/s - s²)) / 2, s = sqrt(2 m), m the real root of
+        m³ + q m - 1/8 = 0 (hyperbolic form, stable for every q >= q_min). """
+    h = np.asarray(h, dtype=float)
+    c = (2.0 * math.pi * max(w, 1e-14)) ** (1.0 / 3.0)
+    q = h / (c * c)
+    inside = q >= _JKR_Q_MIN
+    qq = np.where(inside, q, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        positive = qq > 1e-12
+        root_p = np.sqrt(np.abs(qq) / 3.0)
+        m_pos = 2.0 * root_p * np.sinh(np.arcsinh(3.0 / (16.0 * np.where(positive, qq, 1.0)) /
+                                                   np.where(positive, root_p, 1.0)) / 3.0)
+        negative = qq < -1e-12
+        arg = 3.0 / (16.0 * np.abs(np.where(negative, qq, 1.0))) / np.where(negative, root_p, 1.0)
+        m_neg = 2.0 * root_p * np.cosh(np.arccosh(np.maximum(arg, 1.0)) / 3.0)
+        m = np.where(positive, m_pos, np.where(negative, m_neg, 0.5))
+        s = np.sqrt(2.0 * m)
+        u = 0.5 * (s + np.sqrt(np.maximum(2.0 / s - s * s, 0.0)))
+    u3 = u ** 3
+    force = np.where(inside, c ** 3 * (4.0 / 3.0 * u3 * u3 - 2.0 * u3), 0.0)
+    if not derivatives:
+        return force
+    # dF/dh = c G'(u) / q'(u) and dF/dlog10(w) = ln10 c/3 (3 c² G - 2 h G'/q'), G = 4/3 u⁶ - 2 u³, q = u⁴ - u
+    with np.errstate(invalid="ignore", divide="ignore"):
+        slope = np.where(inside, c * (8.0 * u3 * u * u - 6.0 * u * u) / np.maximum(4.0 * u3 - 1.0, 1e-9), 0.0)
+    g = 4.0 / 3.0 * u3 * u3 - 2.0 * u3
+    by_w = np.where(inside, math.log(10.0) * c / 3.0 * (3.0 * c * c * g - 2.0 * h * slope / c), 0.0)
+    return force, slope, by_w
+
+
 def _jkr_curve(w: float, radius: float, delta_max: float) -> tuple:
     """ Stable branch of JKR in units of the radius (lengths / R): (delta, force / (E* R²)) for w = W / (E* R) from the
-        turning point of delta up to delta_max. a = a_min + t² resolves the square root at the turning point. """
-    w = max(w, 1e-14)
-    a_min = (math.pi * w / 8.0) ** (1.0 / 3.0)
-    a_top = max(math.sqrt(max(delta_max, 0.0)) * 1.2, a_min) + (2.0 * math.pi * w) ** (1.0 / 3.0) + 1e-6
-    t = np.linspace(0.0, math.sqrt(max(a_top - a_min, 1e-12)), 600)
-    a = a_min + t * t
-    d = a * a - np.sqrt(2.0 * math.pi * w * a)
-    f = 4.0 * a ** 3 / 3.0 - np.sqrt(8.0 * math.pi * w * a ** 3)
-    return d, f
+        turning point of delta up to delta_max (for plots; the fit uses _jkr_unit). """
+    c = (2.0 * math.pi * max(w, 1e-14)) ** (1.0 / 3.0)
+    u0 = 4.0 ** (-1.0 / 3.0)
+    top = max((max(delta_max, 0.0) / (c * c) + 2.0) ** 0.25 * 1.2, u0 + 1e-6)
+    u = u0 + np.linspace(0.0, math.sqrt(top - u0), 800) ** 2
+    return c * c * (u ** 4 - u) * radius, c ** 3 * (4.0 / 3.0 * u ** 6 - 2.0 * u ** 3)
 
 
 def jkr_force(h, reduced_modulus: float, work: float, radius: float) -> np.ndarray:
     """ JKR force (N) at the indentations h (m) relative to the point of zero indentation; 0 where detached. """
     h = np.asarray(h, dtype=float) / radius
-    d, f = _jkr_curve(work / (reduced_modulus * radius), 1.0, float(np.nanmax(h, initial=0.0)))
-    return np.interp(h, d, f, left=0.0) * reduced_modulus * radius * radius
+    return _jkr_unit(h, work / (reduced_modulus * radius)) * reduced_modulus * radius * radius
+
+
+def _jkr_starts(x: np.ndarray, y: np.ndarray, radius: float, log_ws: np.ndarray, x0s: np.ndarray,
+                count: int = 2) -> list:
+    """ The best (log w, x0) of the start grid of the JKR fit, the best x0 of each w, the best count of them: one curve
+        per w (a shift of x0 only moves it), all x0 at once. """
+    found = []
+    shifted = (x[None, :] - x0s[:, None]).ravel()
+    for log_w in log_ws:
+        shapes = _jkr_unit(shifted, 10.0 ** log_w).reshape(x0s.size, x.size) * radius * radius
+        norms = np.einsum("ij,ij->i", shapes, shapes)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            e_star = np.where(norms > 0, np.maximum(shapes @ y / norms, 0.0), 0.0)
+        residual = y[None, :] - e_star[:, None] * shapes
+        costs = np.einsum("ij,ij->i", residual, residual)
+        k = int(np.argmin(costs))
+        found.append((float(costs[k]), float(log_w), float(x0s[k])))
+    found.sort()
+    return [(log_w, x0) for _, log_w, x0 in found[:count]]
 
 
 def fit_jkr(delta, force, tip: Tip) -> FitResult:
@@ -400,24 +461,43 @@ def fit_jkr(delta, force, tip: Tip) -> FitResult:
     order = np.argsort(delta)
     x = (delta[order] - float(delta.max())) / radius          # <= 0, in units of R
     y = force[order]
+    x_low, x_high = float(x.min()) - 0.2 * span / radius, -1e-6
 
     def projected(params):
-        log_w, x0 = params
-        d, f = _jkr_curve(10.0 ** log_w, 1.0, -x0)
-        shape = np.interp(x - x0, d, f, left=0.0) * radius * radius
+        log_w = min(max(float(params[0]), -10.0), 3.0)
+        x0 = min(max(float(params[1]), x_low), x_high)
+        shape = _jkr_unit(x - x0, 10.0 ** log_w) * radius * radius
         norm = float(shape @ shape)
         e_star = max(float(shape @ y) / norm, 0.0) if norm > 0 else 0.0
         return shape, e_star
 
+    scale = max(float(np.abs(y).max()), 1e-30)
+
     def residual(params):
         shape, e_star = projected(params)
-        return (y - e_star * shape) / max(float(np.abs(y).max()), 1e-30)
+        return (y - e_star * shape) / scale
 
-    x_low, x_high = float(x.min()) - 0.2 * span / radius, -1e-6
-    starts = [(lw, x0) for lw in np.linspace(-8.0, 1.0, 10) for x0 in np.linspace(x_low, x_high, 12)]
-    costs = [float(np.sum(residual(s) ** 2)) for s in starts]
-    best = starts[int(np.argmin(costs))]
-    result = least_squares(residual, best, bounds=([-10.0, x_low], [3.0, x_high]), diff_step=1e-6, max_nfev=300)
+    def jacobian(params):
+        log_w = min(max(float(params[0]), -10.0), 3.0)
+        x0 = min(max(float(params[1]), x_low), x_high)
+        shape, slope, by_w = (v * radius * radius for v in _jkr_unit(x - x0, 10.0 ** log_w, True))
+        norm = float(shape @ shape)
+        if norm <= 0:
+            return np.zeros((y.size, 2))
+        e_star = float(shape @ y) / norm
+        out = np.empty((y.size, 2))
+        for k, d_shape in enumerate((by_w, -slope)):          # d/d log w, d/d x0
+            d_e = (float(d_shape @ y) - 2.0 * e_star * float(shape @ d_shape)) / norm
+            out[:, k] = -(d_e * shape + e_star * d_shape) / scale
+        return out
+
+    # W and E* trade off on many curves (a shallow valley): refined from the two best starts, the better one kept;
+    result = None
+    for start in _jkr_starts(x, y, radius, np.linspace(-8.0, 1.0, 20), np.linspace(x_low, x_high, 24), 1):
+        trial = least_squares(residual, start, jac=jacobian, bounds=([-10.0, x_low], [3.0, x_high]), max_nfev=300)
+        if result is None or trial.cost < result.cost:
+            result = trial
+    result.x = np.array([min(max(result.x[0], -10.0), 3.0), min(max(result.x[1], x_low), x_high)])
     shape, e_star = projected(result.x)
     if not (e_star > 0 and math.isfinite(e_star)):
         raise FitError("The JKR fit did not converge.")

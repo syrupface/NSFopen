@@ -30,10 +30,19 @@ Added, in `NSFopen.process` (the calculations of NSSA's *Curvature* and *Terrace
   `substrate`, `bonded`: in `map` the thickness of a curve is its height (contact) above the substrate height;
   `spectroscopy.substrate_height()` takes that from curves on the substrate. The fit values get `sample thickness`,
   `bottom χ`, `bottom factor`.
+- Faster: `ForceAnalysis.run(workers=None)` fits in several processes when the first curves show the rest would take
+  more than 3 s (`workers=1`: one process; programs frozen with PyInstaller need `multiprocessing.freeze_support()`).
+  The processes get the curves of their part with the work (`SpecFile.subset()`), not the file, and use one numpy
+  thread each;
+  the contact point grid of Hertz, Sneddon and DMT is computed at once (about 2 times faster, the same results).
+- JKR: the force from the exact closed form (no table), the start grid computed at once and the refinement with the
+  exact derivatives: about 20 % faster, and on curves where W and E* trade off it now finds the better fit.
 - `spectroscopy.complete_model()`: model settings saved before 2.5.0 get the defaults of the new fields.
 - Tests: `tests/test_contact_models.py`.
 
 ### Changed
+- Spectroscopy results: `adhesion force` is now `adhesion (minimum retract)`, so it is not taken for the adhesion of
+  a fit (`adhesion (fit)`).
 - Spectroscopy results: the column `fit region` is now `model region` (`spectroscopy.REGION`), to match NSSA's
   *Model regions*.
 

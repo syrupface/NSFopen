@@ -89,3 +89,86 @@ def test_maugis_fit(lam):
         assert result.values()["Tabor μ"][0] == pytest.approx(1.157 * lam, rel=0.05)
     else:                          # the JKR side: the curve hardly changes with lambda any more
         assert result.extra["Maugis λ"] > 2.5
+
+
+def _example_spec():
+    import pathlib
+    import NSFopen
+    from NSFopen.process import spectroscopy as sp
+    return sp.SpecFile(pathlib.Path(NSFopen.__file__).parent / "example" / "Force_Spectroscopy" / "spectroscopy.nid")
+
+
+def test_vectorized_grid_gives_the_same_fit():
+    """ The contact point grid of Hertz, Sneddon and DMT computed at once gives the same results as point by point. """
+    from NSFopen.process import spectroscopy as sp
+    spec = _example_spec()
+    original = contact._search
+    try:
+        for model, shape in (("hertz", "sphere"), ("sneddon", "hyperboloid"), ("dmt", "cone")):
+            analysis = sp.ForceAnalysis(spec, sp.ForceSettings(model=model, shape=shape))
+            fast = analysis.run(range(12), workers=1).per_curve("E")[:12]
+            contact._search = lambda cost, low, high, grid=60, costs_of=None: original(cost, low, high, grid)
+            slow = analysis.run(range(12), workers=1).per_curve("E")[:12]
+            contact._search = original
+            assert np.array_equal(fast, slow, equal_nan=True)
+    finally:
+        contact._search = original
+
+
+def test_several_processes_give_the_same_results():
+    from NSFopen.process import spectroscopy as sp
+    spec = _example_spec()
+    analysis = sp.ForceAnalysis(spec, sp.ForceSettings(model="jkr"))
+    curves = list(range(24))
+    one = analysis.run(curves, workers=1)
+    seen = []
+    two = analysis.run(curves, workers=2, progress=lambda done, total: seen.append((done, total)) is None)
+    assert [row["curve"] for row in two.rows] == [n + 1 for n in curves]
+    assert np.array_equal(one.per_curve("E"), two.per_curve("E"), equal_nan=True)
+    assert seen and seen[-1] == (24, 24)
+    stopped = analysis.run(curves, workers=2, progress=lambda done, total: done < 6)
+    assert 6 <= len(stopped.rows) < 24
+    assert sp.auto_workers(0.5) == 1
+
+
+def test_subset_carries_only_its_curves():
+    """ The processes get the curves of their chunk (SpecFile.subset), not the file: the same fits, a small copy. """
+    import pickle
+    from NSFopen.process import spectroscopy as sp
+    spec = _example_spec()
+    analysis = sp.ForceAnalysis(spec, sp.ForceSettings(model="hertz"))
+    chunk = [10, 11, 12]
+    sub = spec.subset(chunk, analysis.segment_names(), analysis.channels())
+    sub = pickle.loads(pickle.dumps(sub))
+    assert sub.n_curves == spec.n_curves and sub.grid == spec.grid and sub._reader is None
+    part = sp.ForceAnalysis(sub, sp.ForceSettings(model="hertz"))
+    part._sign = analysis.curve(0, fit=False) and analysis._sign
+    for n in chunk:
+        assert part.curve(n).values["E"] == analysis.curve(n).values["E"]
+    assert len(pickle.dumps(sub)) < 0.2 * sum(spec.data(s, c, n).nbytes for s in analysis.segment_names()
+                                              for c in analysis.channels() for n in range(spec.n_curves))
+
+
+def test_jkr_closed_form_and_fit():
+    """ The closed-form JKR force equals the parametric curve, its derivatives are right, and a fit of a synthetic
+        JKR retract curve gets E, W and the contact point back. """
+    w = 0.02
+    d, f = contact._jkr_curve(w, 1.0, 2.0)
+    assert contact._jkr_unit(d, w) == pytest.approx(f, rel=1e-9, abs=1e-12)
+    h = np.linspace(-0.3, 2.0, 40)
+    force, slope, by_w = contact._jkr_unit(h, w, True)
+    step = 1e-7
+    assert slope[force != 0] == pytest.approx(((contact._jkr_unit(h + step, w) - contact._jkr_unit(h - step, w))
+                                              / (2 * step))[force != 0], rel=1e-5)
+    assert by_w[force != 0] == pytest.approx(((contact._jkr_unit(h, w * 10 ** step)
+                                              - contact._jkr_unit(h, w * 10 ** -step)) / (2 * step))[force != 0],
+                                             rel=1e-5)
+    radius, e, work = 20e-9, 1e9, 0.05
+    e_star = e / 0.75
+    delta = np.linspace(-6e-9, 10e-9, 250)[::-1]
+    model = contact.jkr_force(delta - 2e-9, e_star, work, radius)
+    low = int(np.argmin(model))
+    result = contact.fit_jkr(delta[:low + 20], model[:low + 20], contact.Tip("sphere", radius))
+    assert result.modulus == pytest.approx(e, rel=1e-3)
+    assert result.work_of_adhesion == pytest.approx(work, rel=1e-3)
+    assert result.contact_point == pytest.approx(2e-9, abs=1e-11)
