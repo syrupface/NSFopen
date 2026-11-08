@@ -1,8 +1,8 @@
 # Change log
 
-## 2.5.0 (not yet released)
+## 2.5.0 (November 8, 2026)
 
-Compared to **2.4.0**.
+Compared to **2.4.1**.
 
 ### Terraces and curvature
 Added, in `NSFopen.process` (the calculations of NSSA's *Curvature* and *Terrace analysis* tools):
@@ -46,9 +46,13 @@ Added, in `NSFopen.process` (the calculations of NSSA's *Curvature* and *Terrace
 - Spectroscopy results: the column `fit region` is now `model region` (`spectroscopy.REGION`), to match NSSA's
   *Model regions*.
 
-### Fixed
-- Reading a NID file gave a pandas warning (`Series.dropna(inplace=True)` is deprecated from pandas 3.1).
+## 2.4.1 (November 4, 2026)
 
+### Fixed
+- Reading a NID file gave a pandas warning (`Series.dropna(inplace=True)` is deprecated from pandas 3.1). The data is
+  the same.
+
+## 2.4.0 (November 4, 2026)
 
 Compared to **2.3.0**.
 
