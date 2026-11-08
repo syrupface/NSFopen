@@ -27,7 +27,7 @@ results.write_csv("spectroscopy_results.csv")
 
 # Maps of the modulus and the adhesion (NaN: left out or not fitted)
 fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-for ax, name in zip(axes, ("E", "adhesion force")):
+for ax, name in zip(axes, ("E", "adhesion (minimum retract)")):
     values = results.map(name)
     image = ax.imshow(values, origin="lower", cmap="viridis")
     ax.set_title(f"{name} [{results.units[name]}]")

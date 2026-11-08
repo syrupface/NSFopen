@@ -860,3 +860,171 @@ def lattice(state: ops.State, mode: str = "all", a: Optional[tuple] = None, b: O
 
 
 # ---- results of the line cut measurements as text (Line cut panel, report) ----
+
+
+# ---- curvature ----
+
+@dataclasses.dataclass
+class Curvature:
+    """ Quadratic surface z = a + b x + c y + d x² + e x y + f y² fitted to a height image, and its principal
+    curvatures at the center of the paraboloid (where its slope is zero, so the values are exact there). Positive
+    curvature: the surface curves up (a bowl or valley), negative: down (a dome or ridge). Positions are image
+    coordinates as shown: x to the right from the left edge, y down from the top edge; angles are counterclockwise from
+    the x axis as seen on the screen. """
+    curvature_1: float              # 1/m, the larger by magnitude
+    curvature_2: float
+    angle_1: float                  # degrees, direction of curvature_1 (0 to 180)
+    angle_2: float
+    center: Optional[tuple]         # (x, y) in m of the stationary point; None for a cylinder (no single center)
+    center_z: float                 # m, height of the fit at the center
+    center_inside: bool
+    bow: float                      # m, peak to valley of the fitted surface over the region
+    rms: float                      # m, residual of the fit
+    coefficients: tuple             # a, b, c, d, e, f in m and m^-1 (x, y in m from the image center)
+    region: str = "all"
+    manual_center: bool = False     # True: the center was given and the fit made with its vertex there
+
+    @property
+    def radius_1(self) -> float:
+        return 1.0 / self.curvature_1 if self.curvature_1 else math.inf
+
+    @property
+    def radius_2(self) -> float:
+        return 1.0 / self.curvature_2 if self.curvature_2 else math.inf
+
+    @property
+    def mean_curvature(self) -> float:
+        return 0.5 * (self.curvature_1 + self.curvature_2)
+
+    @property
+    def gaussian_curvature(self) -> float:
+        return self.curvature_1 * self.curvature_2
+
+    def summary(self) -> str:
+        def length(value):
+            if not math.isfinite(value):
+                return "infinite"
+            magnitude = abs(value)
+            for limit, scale, unit in ((1e-6, 1e9, "nm"), (1e-3, 1e6, "µm"), (1.0, 1e3, "mm")):
+                if magnitude < limit:
+                    return f"{value * scale:.4g} {unit}"
+            return f"{value:.4g} m"
+
+        def shape(k1, k2):
+            if k1 * k2 > 0:
+                return "a bowl (curves up in every direction)" if k1 > 0 else "a dome (curves down in every direction)"
+            if k1 * k2 < 0:
+                return "a saddle"
+            return "a cylinder" if k1 or k2 else "flat"
+
+        center = ("none (the surface is a cylinder or flat)" if self.center is None else
+                  f"x = {length(self.center[0])}, y = {length(self.center[1])}"
+                  + (" (set by hand)" if self.manual_center else "")
+                  + ("" if self.center_inside else " (outside the image)"))
+        return (f"Radius of curvature R1 = {length(self.radius_1)} along {self.angle_1:.1f}°, "
+                f"R2 = {length(self.radius_2)} along {self.angle_2:.1f}° ({shape(self.curvature_1, self.curvature_2)})\n"
+                f"Center: {center}; bow (peak to valley of the fit) {length(self.bow)}, fit rms {length(self.rms)}")
+
+    def rows(self) -> list:
+        """ (name, value, unit) for a table. """
+        rows = [("R1", self.radius_1, "m"), ("R2", self.radius_2, "m"), ("Direction of R1", self.angle_1, "°"),
+                ("Direction of R2", self.angle_2, "°"), ("Curvature 1", self.curvature_1, "1/m"),
+                ("Curvature 2", self.curvature_2, "1/m"), ("Mean curvature", self.mean_curvature, "1/m"),
+                ("Gaussian curvature", self.gaussian_curvature, "1/m²"), ("Bow (peak to valley)", self.bow, "m"),
+                ("Fit rms", self.rms, "m")]
+        if self.center is not None:
+            rows += [("Center x", self.center[0], "m"), ("Center y", self.center[1], "m"),
+                     ("Center height", self.center_z, "m")]
+        return rows
+
+    def profile(self, which: int, width: float, height: float) -> tuple:
+        """ ((x0, y0), (x1, y1)): the line along principal direction 1 or 2 through the center (through the image
+            center when the center is outside or there is none), clipped to an image of width x height (m). """
+        cx, cy = self.center if self.center is not None and self.center_inside else (width / 2, height / 2)
+        angle = math.radians(self.angle_1 if which == 1 else self.angle_2)
+        ux, uy = math.cos(angle), -math.sin(angle)              # screen y points down
+        start, stop = -math.inf, math.inf
+        for c, direction, top in ((cx, ux, width), (cy, uy, height)):
+            if abs(direction) > 1e-12:
+                low, high = sorted(((0 - c) / direction, (top - c) / direction))
+                start, stop = max(start, low), min(stop, high)
+        return (cx + ux * start, cy + uy * start), (cx + ux * stop, cy + uy * stop)
+
+
+def extreme_point(state: ops.State, mode: str = "all", which: str = "max", smooth: float = 2.0) -> tuple:
+    """ The highest (which='max') or lowest ('min') point of the region, (x, y) in m in image coordinates (x from the
+        left edge, y down from the top edge, pixel centers), of the heights smoothed with a Gaussian of `smooth` pixels (0:
+        none), so a single noisy pixel does not decide it. A starting point for the center of the curvature. The image
+        is taken as it is: a tilt moves the point downhill-to-uphill (by tilt x radius on a sphere), so level the plane
+        first. (Removing a fitted plane here would not do: on a dome that is off the center of the image it pulls the
+        point to the center.) """
+    if which not in ("max", "min"):
+        raise ops.OpError("which must be 'max' or 'min'.")
+    use = region_pixels(state.data, state.mask, mode)
+    if use.sum() < 3:
+        raise ops.OpError("Too few pixels in the region.")
+    leveled = np.where(use, state.data, 0.0).astype(float)
+    if smooth > 0:
+        weight = ndimage.gaussian_filter(use.astype(float), smooth)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            leveled = ndimage.gaussian_filter(leveled, smooth) / weight
+    values = np.where(use, leveled if which == "max" else -leveled, -np.inf)
+    row, col = np.unravel_index(int(np.argmax(values)), values.shape)
+    return float((col + 0.5) * state.dx), float((row + 0.5) * state.dy)
+
+
+def curvature(state: ops.State, mode: str = "all", center: Optional[tuple] = None) -> Curvature:
+    """ Curvature of a height image from a quadratic fit over the region ('all', 'masked', 'unmasked'): the principal
+        radii of curvature, their directions, the center and the bow. For wafers, lenses, spheres, tips and bent
+        samples; the heights must be in m. center: (x, y) in m (image coordinates: x from the left edge, y down from
+        the top edge) to fix the vertex of the fitted surface there instead of finding it, e.g. the apex of a lens
+        that a tilt of the sample would move. """
+    if state.unit != "m":
+        raise ops.OpError("The curvature needs a height channel (heights in m).")
+    use = region_pixels(state.data, state.mask, mode)
+    if use.sum() < 12:
+        raise ops.OpError("Too few pixels in the region for a quadratic fit.")
+    ny, nx = state.data.shape
+    rows, cols = np.nonzero(use)
+    x = (cols + 0.5) * state.dx                     # image coordinates as shown, m
+    y = (rows + 0.5) * state.dy
+    x0, y0 = 0.5 * nx * state.dx, 0.5 * ny * state.dy
+    scale = max(nx * state.dx, ny * state.dy)
+    u, v = (x - x0) / scale, (y - y0) / scale       # well conditioned
+    z = state.data[use]
+    if center is not None:
+        # vertex fixed at the center: no linear terms around it; written in the same coefficients as the free fit
+        pu, pv = (float(center[0]) - x0) / scale, (float(center[1]) - y0) / scale
+        du, dv = u - pu, v - pv
+        q, *_ = np.linalg.lstsq(np.stack([np.ones_like(du), du * du, du * dv, dv * dv], 1), z, rcond=None)
+        a0, dd, ee, ff = q
+        p = np.array([a0 + dd * pu * pu + ee * pu * pv + ff * pv * pv, -2 * dd * pu - ee * pv, -ee * pu - 2 * ff * pv,
+                      dd, ee, ff])
+    else:
+        p, *_ = np.linalg.lstsq(np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], 1), z, rcond=None)
+    design = np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], 1)
+    fitted = design @ p
+    rms = float(np.sqrt(np.mean((z - fitted) ** 2)))
+    a, b, c, d, e, f = p[0], p[1] / scale, p[2] / scale, p[3] / scale ** 2, p[4] / scale ** 2, p[5] / scale ** 2
+    hessian = np.array([[2 * d, e], [e, 2 * f]])
+    values, vectors = np.linalg.eigh(hessian)
+    order = np.argsort(-np.abs(values))
+    values, vectors = values[order], vectors[:, order]
+    values[np.abs(values) < 1e-6 * np.abs(values[0])] = 0.0        # a cylinder: no curvature along its axis
+    angles = [math.degrees(math.atan2(-vectors[1, k], vectors[0, k])) % 180.0 for k in range(2)]   # screen y up
+    center_given = center
+    center, center_z, inside = None, math.nan, False
+    if center_given is not None:
+        center = (float(center_given[0]), float(center_given[1]))
+        pu, pv = center[0] - x0, center[1] - y0
+        center_z = float(a + b * pu + c * pv + d * pu ** 2 + e * pu * pv + f * pv ** 2)
+        inside = 0 <= center[0] <= nx * state.dx and 0 <= center[1] <= ny * state.dy
+    elif abs(values[1]) > 1e-9 * abs(values[0]) and abs(values[0]) > 0:
+        offset = np.linalg.solve(hessian, -np.array([b, c]))
+        center = (float(x0 + offset[0]), float(y0 + offset[1]))
+        center_z = float(a + b * offset[0] + c * offset[1] + d * offset[0] ** 2 + e * offset[0] * offset[1]
+                         + f * offset[1] ** 2)
+        inside = 0 <= center[0] <= nx * state.dx and 0 <= center[1] <= ny * state.dy
+    return Curvature(float(values[0]), float(values[1]), angles[0], angles[1], center, center_z, inside,
+                     float(np.ptp(fitted)), rms, (float(a), float(b), float(c), float(d), float(e), float(f)), mode,
+                     center_given is not None)

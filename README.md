@@ -1,8 +1,15 @@
 # NSFopen
 Open and analyze Nanosurf NID and NHF files in Python: images, force spectroscopy and WaveMode NMA.
 
-## What's new in 2.4.1
-A fix: reading NID files no longer gives a pandas warning (pandas 3.1 and newer).
+## What's new in 2.5.0
+Compared to 2.4.1:
+- **Terrace analysis:** `process.terraces()` finds the terraces of a stepped surface and their common step height, with
+  the background fitted together with the terraces; `level_terraces()` levels a staircase without tilting it.
+- **Curvature:** `process.curvature()` gives the principal radii of curvature, their directions, the center and the bow.
+- **Maugis-Dugdale** contact model for adhesive samples between DMT and JKR (modulus, work of adhesion, Maugis
+  parameter), and the **bottom-effect correction** of Hertz, Sneddon and DMT for thin samples on a hard substrate
+  (cells, gels, films), with one thickness or the height of every curve of a map.
+- **Faster force maps:** long analyses run in several processes at once; Hertz, Sneddon, DMT and JKR fit faster.
 
 ## What's new in 2.4.0
 Compared to 2.3.0:

@@ -17,6 +17,7 @@ import io
 import math
 import pathlib
 import re
+import time
 import warnings
 from typing import Callable, Optional
 
@@ -318,6 +319,26 @@ class SpecFile:
         if self._reader is not None and hasattr(self._reader, "close"):
             self._reader.close()
 
+    def subset(self, indices, segments, channels) -> "SpecFile":
+        """ A small copy holding only the given curves of the given segments and channels (and the first channel of
+            each segment, which the ramp needs), with everything else of the file (metadata, positions): for the
+            processes that fit part of a large file, which so need not read the whole file. Curve numbers stay those
+            of the file. """
+        sub = SpecFile.__new__(SpecFile)
+        for name, value in self.__dict__.items():
+            if name not in ("_reader", "_spec", "_cache", "_arrays"):
+                sub.__dict__[name] = value
+        sub._reader, sub._cache = None, {}
+        arrays = {}
+        for segment in segments:
+            if segment is None:
+                continue
+            wanted = [c for c in dict.fromkeys(list(channels) + self.segment(segment).channels[:1])
+                      if c != RAMP and c in self.segment(segment).channels]
+            arrays[segment] = {c: {int(n): self.data(segment, c, int(n)) for n in indices} for c in wanted}
+        sub._arrays = arrays
+        return sub
+
 
 RAMP = "Ramp (from the settings)"          # x channel built from the ramp of the file when it is not stored
 
@@ -548,9 +569,23 @@ class ForceSettings:
     fit_max_force: float = 100.0            # %: approach fits use the points up to this share of the maximum force
     op_lower: float = 20.0                  # %: Oliver-Pharr fit range of the unloading curve
     op_upper: float = 95.0
+    thickness_mode: str = "off"             # bottom effect: off (thick sample), fixed, map (from the contact height)
+    thickness: float = 5e-6                 # m: the sample thickness (fixed)
+    substrate: float = 0.0                  # m: height (contact) of the substrate (map: thickness = height - this)
+    bonded: bool = True                     # the sample is bonded to the substrate
 
-    def tip(self) -> contact.Tip:
-        return contact.Tip(self.shape, self.radius, self.half_angle, self.poisson)
+    def tip(self, thickness: float = math.inf) -> contact.Tip:
+        return contact.Tip(self.shape, self.radius, self.half_angle, self.poisson, thickness, bool(self.bonded))
+
+    def thickness_at(self, contact_x: float) -> float:
+        """ The sample thickness for the bottom-effect correction at a curve whose contact is at the piezo position
+            contact_x: inf (off), the fixed value, or (map) its height above the substrate, i.e.
+            -contact_x - substrate. NaN: the curve has no contact point (map); <= 0: on the substrate. """
+        if self.thickness_mode == "fixed":
+            return float(self.thickness)
+        if self.thickness_mode == "map":
+            return -float(contact_x) - float(self.substrate) if math.isfinite(contact_x) else math.nan
+        return math.inf
 
 
 @dataclasses.dataclass
@@ -683,7 +718,17 @@ class ForceAnalysis:
 
     def fit(self, curve: ForceCurve):
         s = self.settings
-        tip = s.tip()
+        thickness = s.thickness_at(curve.contact_x)
+        if s.thickness_mode != "off" and s.model not in contact.BOTTOM_MODELS:
+            curve.error = (f"The bottom-effect correction is for Hertz, Sneddon and DMT, not "
+                           f"{dict(contact.MODELS)[s.model]}: set the sample to thick.")
+            return
+        if s.thickness_mode == "map" and not math.isfinite(thickness):
+            curve.error = "No contact point on the approach curve: the sample thickness is not known."
+            return
+        if thickness <= 0:                       # on (or below) the substrate: nothing to correct
+            thickness = math.inf
+        tip = s.tip(thickness)
         segment = contact.MODEL_SEGMENT[s.model] if s.fit_segment == "auto" else s.fit_segment
         curve.fit_segment = segment
         data = curve.approach if segment == APPROACH else curve.retract
@@ -700,6 +745,9 @@ class ForceAnalysis:
             elif s.model == "jkr":
                 delta, force = _retract_through_pull_off(data)
                 curve.fit = contact.fit_jkr(delta, force, tip)
+            elif s.model == "maugis":
+                delta, force = _retract_through_pull_off(data)
+                curve.fit = contact.fit_maugis(delta, force, tip)
             elif s.model == "oliver_pharr":
                 zero = curve.contact_delta
                 if not math.isfinite(zero):
@@ -714,27 +762,155 @@ class ForceAnalysis:
             return
         curve.values.update(curve.fit.values())
 
-    def run(self, indices=None, progress: Optional[Callable[[int, int], bool]] = None) -> "Results":
-        """ Every curve (or the given ones): their values. progress(done, total) returning False stops. """
+    def run(self, indices=None, progress: Optional[Callable[[int, int], bool]] = None,
+            workers: Optional[int] = None) -> "Results":
+        """ Every curve (or the given ones): their values. progress(done, total) returning False stops.
+            workers: processes to fit with; None: chosen from the time of the first curves (more than one process
+            only when the rest would take more than PARALLEL_SECONDS, at most one less than the CPU count); 1: in
+            this process. The processes get the curves they fit with the work (they do not open the file). """
         indices = list(range(self.spec.n_curves) if indices is None else indices)
-        rows, curves_failed = [], 0
-        for done, n in enumerate(indices, start=1):
-            try:
-                curve = self.curve(n)
-                row = {name: value for name, (value, _) in curve.values.items()}
-                row["error"] = curve.error
-                units = {name: unit for name, (_, unit) in curve.values.items()}
-            except SpecError as e:
-                row, units = {"error": str(e)}, {}
-                curves_failed += 1
-            row["curve"] = n + 1
-            rows.append((row, units))
-            if progress is not None and progress(done, len(indices)) is False:
-                break
-        units = {}
-        for _, u in rows:
-            units.update(u)
-        return Results([r for r, _ in rows], units, self.spec)
+        total = len(indices)
+        rows = []
+        fitting = 0.0                              # seconds of fitting (not of the progress, e.g. a dialog)
+        probe = min(PROBE_CURVES, total) if workers is None else (total if workers <= 1 else 0)
+        for k, n in enumerate(indices[:probe]):
+            start = time.perf_counter()
+            rows.append(_row(self, n))
+            if k:                                  # the first curve also reads the file and fills the caches
+                fitting += time.perf_counter() - start
+            if progress is not None and progress(len(rows), total) is False:
+                return _results(rows, self.spec)
+        rest = indices[probe:]
+        if rest:
+            if workers is None:
+                per_curve = fitting / max(probe - 1, 1)
+                workers = auto_workers(per_curve * len(rest))
+            if workers > 1:
+                rows += _run_parallel(self, rest, workers, progress, len(rows), total)
+            else:
+                for n in rest:
+                    rows.append(_row(self, n))
+                    if progress is not None and progress(len(rows), total) is False:
+                        break
+        return _results(rows, self.spec)
+
+
+PROBE_CURVES = 4            # curves fitted first to estimate the time of the rest
+PARALLEL_SECONDS = 3.0      # several processes only for longer jobs (starting them takes about a second)
+
+
+def auto_workers(seconds: float) -> int:
+    """ Processes for a job estimated at the given seconds in one process: 1 for short jobs, otherwise the CPU count
+        less one (the program stays responsive), at most 16. """
+    import os
+    cpus = os.cpu_count() or 1
+    if seconds < PARALLEL_SECONDS or cpus < 2:
+        return 1
+    return max(2, min(cpus - 1, 16, int(seconds / 0.5)))
+
+
+def _row(analysis: "ForceAnalysis", n: int) -> tuple:
+    """ (values, units) of curve n for the results. """
+    try:
+        curve = analysis.curve(n)
+        row = {name: value for name, (value, _) in curve.values.items()}
+        row["error"] = curve.error
+        units = {name: unit for name, (_, unit) in curve.values.items()}
+    except SpecError as e:
+        row, units = {"error": str(e)}, {}
+    row["curve"] = n + 1
+    return row, units
+
+
+def _results(rows: list, spec) -> "Results":
+    units = {}
+    for _, u in rows:
+        units.update(u)
+    return Results([r for r, _ in sorted(rows, key=lambda r: r[0]["curve"])], units, spec)
+
+
+def _worker_start():
+    warnings.simplefilter("ignore")
+
+
+def _worker_rows(spec: "SpecFile", settings: dict, sign: float, indices: list) -> list:
+    analysis = ForceAnalysis(spec, ForceSettings(**settings))
+    analysis._sign = sign
+    return [_row(analysis, n) for n in indices]
+
+
+_ONE_THREAD = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+               "NUMEXPR_NUM_THREADS")
+
+
+def _run_parallel(analysis: "ForceAnalysis", indices: list, workers: int, progress, done: int, total: int) -> list:
+    """ The rows of the curves fitted by several processes in chunks (in any order; sorted later). Every chunk
+        carries its own curves (SpecFile.subset), so the processes do not read the file, and only a few chunks per
+        process are under way at a time (the memory stays small for large maps). numpy's own threads are kept to one
+        per process (otherwise the processes and their threads compete for the cores). If the processes cannot be
+        started or fail, the curves left are fitted in this process. Stopping (progress returns False) cancels the
+        chunks not started. """
+    import concurrent.futures
+    import multiprocessing
+    import os
+    size = int(min(200, max(4, math.ceil(len(indices) / (workers * 8)))))
+    chunks = [indices[k:k + size] for k in range(0, len(indices), size)]
+    approach, retract = analysis.segment_names()
+    channels = analysis.channels()
+    settings = dataclasses.asdict(analysis.settings)
+    if analysis._sign is None and indices:
+        analysis.curve(indices[0], fit=False)          # finds the orientation from the file
+    sign = analysis._sign
+    rows, finished = [], set()
+    pool = None
+    saved = {name: os.environ.get(name) for name in _ONE_THREAD}
+    try:
+        for name in _ONE_THREAD:                         # the processes inherit them when they start
+            os.environ[name] = "1"
+        pool = concurrent.futures.ProcessPoolExecutor(
+            workers, mp_context=multiprocessing.get_context("spawn"), initializer=_worker_start)
+        pending, futures, next_chunk = set(), {}, 0
+
+        def submit_more():
+            nonlocal next_chunk
+            while next_chunk < len(chunks) and len(pending) < 3 * workers:
+                chunk = chunks[next_chunk]
+                spec = analysis.spec.subset(chunk, (approach, retract), channels)
+                future = pool.submit(_worker_rows, spec, settings, sign, chunk)
+                futures[future] = next_chunk
+                pending.add(future)
+                next_chunk += 1
+
+        submit_more()
+        while pending:                      # progress at least every 0.1 s: a window stays responsive
+            ready, _ = concurrent.futures.wait(pending, timeout=0.1, return_when=concurrent.futures.FIRST_COMPLETED)
+            for future in ready:
+                pending.discard(future)
+                rows += future.result()
+                finished.add(futures[future])
+            submit_more()
+            if progress is not None and progress(done + len(rows), total) is False:
+                for other in pending:
+                    other.cancel()
+                return rows
+    except (OSError, RuntimeError, concurrent.futures.process.BrokenProcessPool, ImportError, SpecError) as e:
+        warnings.warn(f"Fitting in several processes failed ({e}); going on in one.")
+        for k, chunk in enumerate(chunks):
+            if k in finished:
+                continue
+            for n in chunk:
+                rows.append(_row(analysis, n))
+                if progress is not None and progress(done + len(rows), total) is False:
+                    return rows
+    finally:
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+    return rows
 
 
 def _contact_part(data: SegmentData, segment: str, contact_delta: float, max_force_percent: float) -> tuple:
@@ -795,7 +971,7 @@ def _measure(curve: ForceCurve):
             values["slope (top half)"] = (float(np.polyfit(a.x[upper], a.force[upper], 1)[0]), "N/m")
     if r is not None:
         low = int(np.argmin(r.force))
-        values["adhesion force"] = (max(-float(r.force[low]), 0.0), "N")
+        values["adhesion (minimum retract)"] = (max(-float(r.force[low]), 0.0), "N")
         if math.isfinite(curve.contact_x):
             values["pull-off distance"] = (float(curve.contact_x - r.x[low]), "m")    # piezo retraction past contact
         attractive = np.minimum(r.force, 0.0)
@@ -809,26 +985,52 @@ def _measure(curve: ForceCurve):
 
 # ---- results of many curves ----
 
-REGION = "fit region"                  # 0: the settings of all curves, 1, 2, ...: the regions fitted with other settings
+REGION = "model region"                # 0: the settings of all curves, 1, 2, ...: the regions fitted with other settings
 MODEL_FIELDS = ("model", "shape", "radius", "half_angle", "poisson", "fit_segment", "fit_max_force", "op_lower",
-                "op_upper")            # what a fit region sets; the processing (filter, baseline, k) is the same for all
+                "op_upper", "thickness_mode", "thickness", "substrate", "bonded")            # what a model region sets; the processing (filter, baseline, k) is the same for all
 
 
 def model_settings(settings: ForceSettings) -> dict:
     return {name: getattr(settings, name) for name in MODEL_FIELDS}
 
 
+def complete_model(model: dict) -> dict:
+    """ A model dict with every MODEL_FIELDS entry (older files lack the newer ones: their defaults). """
+    defaults = model_settings(ForceSettings())
+    return {name: model.get(name, defaults[name]) for name in MODEL_FIELDS}
+
+
 def describe_model(model: dict) -> str:
-    """ 'JKR, sphere R 20 nm, ν 0.5' """
+    """ 'JKR, sphere R 20 nm, ν 0.5' (with ', thin 3 µm, bonded' or ', thin from the height' for the bottom
+        effect) """
     from . import contact as _contact
+    model = complete_model(model)
     shape = dict(_contact.SHAPES).get(model["shape"], model["shape"]).lower()
     geometry = []
     if model["shape"] in ("sphere", "hyperboloid", "punch"):
         geometry.append(f"R {format_value(model['radius'], 'm', 3)}")
     if model["shape"] in ("cone", "pyramid", "hyperboloid"):
         geometry.append(f"{model['half_angle']:g}°")
-    return f"{dict(_contact.MODELS)[model['model']]}, {shape} {' '.join(geometry)}, ν {model['poisson']:g}".replace(
-        "  ", " ")
+    text = f"{dict(_contact.MODELS)[model['model']]}, {shape} {' '.join(geometry)}, ν {model['poisson']:g}"
+    if model["thickness_mode"] != "off":
+        thin = (f"thin {format_value(model['thickness'], 'm', 3)}" if model["thickness_mode"] == "fixed"
+                else f"thin from the height (substrate {format_value(model['substrate'], 'm', 3)})")
+        text += f", {thin}, {'bonded' if model['bonded'] else 'not bonded'}"
+    return text.replace("  ", " ")
+
+
+def substrate_height(analysis: "ForceAnalysis", indices) -> float:
+    """ Median height (contact) of the given curves, e.g. the masked ones on the substrate: the 'substrate' of the
+        bottom-effect correction from the height. NaN if none has a contact point. """
+    heights = []
+    for n in indices:
+        try:
+            curve = analysis.curve(int(n), fit=False)
+        except SpecError:
+            continue
+        if math.isfinite(curve.contact_x):
+            heights.append(-curve.contact_x)
+    return float(np.median(heights)) if heights else math.nan
 
 class Results:
     """ The values of many curves: rows (dicts) in curve order, statistics and maps. """
