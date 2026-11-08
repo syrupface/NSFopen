@@ -14,7 +14,8 @@ class TestExamples(unittest.TestCase):
     def test_scripts_run(self):
         scripts = [p for p in sorted(EXAMPLES.glob("*/*.py")) if p.name != "sader.py"]
         self.assertGreaterEqual(len(scripts), 8)
-        environment = dict(os.environ, MPLBACKEND="Agg", PYTHONPATH=str(ROOT))
+        # UTF-8 as in a terminal: piped output of Windows uses the ANSI code page (cp1252), which has no χ or µ
+        environment = dict(os.environ, MPLBACKEND="Agg", PYTHONPATH=str(ROOT), PYTHONIOENCODING="utf-8")
         for script in scripts:
             with self.subTest(script.name):
                 done = subprocess.run([sys.executable, script.name], cwd=script.parent, env=environment,
